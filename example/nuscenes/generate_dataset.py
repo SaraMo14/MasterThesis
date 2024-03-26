@@ -26,7 +26,9 @@ def process_agent_data(mini_train, helper):
 
     # Get annotation and store for later
     annotation = helper.get_sample_annotation(instance_token, sample_token)
+    print(annotation)
     yaw, pitch, roll = quaternion_to_euler(annotation['rotation'])
+    #yaw_degrees = math.degrees(yaw)
     # Get future agent behavior
     #future_local_xy = helper.get_future_for_agent(instance_token, sample_token, seconds=3, in_agent_frame=True)
     
@@ -104,7 +106,8 @@ def quaternion_to_euler(quaternion):
     # Yaw (z-axis rotation)
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
+    yaw = math.atan2(siny_cosp, cosy_cosp) # using  yaw_rad = np.arctan2(2 * (x * y + w * z), 1 - 2 * (x**2 + y**2)) is more efficient?
+    
 
     return yaw, pitch, roll #in radiants 
 
@@ -161,12 +164,12 @@ if __name__ == "__main__":
 
     # Merge with sample data.
     df_sample = pd.DataFrame(nuscenes.sample).rename(columns={'token': 'sample_token'}).drop(columns=["prev", "next", "data", "anns"]).rename(columns={'token': 'sample_token'})
-    states_df = pd.merge(df, df_sample, left_on='sample_token', right_on='sample_token', how='left').drop(columns=["sample_token"])
+    states_df = pd.merge(df, df_sample, left_on='sample_token', right_on='sample_token', how='left')#.drop(columns=["sample_token"])
 
     # Output the processed DataFrame to a CSV file.
     #output_csv_path = os.path.join(DATAROOT, 'dataset.csv')
     output_csv_path = DATAROOT / 'dataset.csv'
-    states_df.to_csv(output_csv_path, index=False)  # Optional: index=False to exclude row index
+    #states_df.to_csv(output_csv_path, index=False)  # Optional: index=False to exclude row index
 
 
 # Make the directory to store the nuScenes dataset in.

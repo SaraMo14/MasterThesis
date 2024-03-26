@@ -17,9 +17,9 @@ class Velocity(Enum):
 
 class Rotation(Enum):
   LEFT = auto()
-  SLIGHT_LEFT = auto()
+  #SLIGHT_LEFT = auto()
   STRAIGHT = auto()
-  SLIGHT_RIGHT = auto()
+  #SLIGHT_RIGHT = auto()
   RIGHT = auto()
 
 class RotationRate(Enum):
@@ -29,7 +29,7 @@ class RotationRate(Enum):
   SLIGHT_LEFT = auto()
   LEFT_TURN = auto()
 
-class Position(): #could be discretized based on the position of the car on the closest lane.
+class Position(): #output of LIDAR
   def __init__(self):
     self.x = 0
     self.y = 0
@@ -73,8 +73,14 @@ class AVDiscretizer():
         super(AVDiscretizer, self).__init__()
 
         self.unique_states = set()
-        self.velocity_thr = [0, 15, 30, 50, 80] #km/h
-        self.rotation_thr = [-2, -1., 0., 1., 2] #radiants
+        #TODO: modify values
+        self.velocity_thr = [0, 4, 8, 14, 22] #m/s while in km/h would be[0, 15, 30, 50, 80] 
+        self.rotation_thr = [-1, 0., 1] #degrees
+
+    @staticmethod
+    def is_close(a, b, eps=0.1):
+        return abs(a - b) <= eps
+
     
     def discretize_state(self,
                    state: np.ndarray
@@ -133,16 +139,16 @@ class AVDiscretizer():
                 
 
     @staticmethod
-    def discretize_speed(thresholds, speed, epsilon=1) -> Velocity:
+    def discretize_speed(thresholds, speed) -> Velocity:
         for i, threshold in enumerate(thresholds):
-            if  threshold - epsilon < speed <= threshold + epsilon: 
+            if speed <= threshold: 
                 return Velocity(i + 1)
         return Velocity.VERY_HIGH
 
     @staticmethod
-    def discretize_rotation(thresholds, rotation, epsilon=0.1) -> Rotation:
+    def discretize_rotation(thresholds, rotation) -> Rotation:
         for i, threshold in enumerate(thresholds):
-            if threshold - epsilon < rotation <= threshold + epsilon:  
+            if rotation <= threshold:  
                 return Rotation(i + 1)
         return Rotation.RIGHT
 
@@ -151,7 +157,7 @@ class AVDiscretizer():
       #Values Reference: https://pure.tue.nl/ws/portalfiles/portal/50922576/matecconf_aigev2017_01005.pdf
 
 
-    def compute_trajectory(self, states, filenames):
+    def compute_trajectory(self, states):#, filenames):
         """
             Discretizes a trajectory (list of states) and stores unique states.
 
@@ -183,12 +189,13 @@ class AVDiscretizer():
             print(f'action: {action}')            
 
             ######### display image for visual test #############
-            image_path = filenames['filename'].iloc[i]  # Gets the first image filename
+            #nuscenes.render_instance('0c3833f73f0e43288758cb87c9d2a4fe')
+            #image_path = filenames['filename'].iloc[i]  # Gets the first image filename
 
-            img = mpimg.imread('/home/saramontese/Desktop/MasterThesis/pgeon-main/example/nuscenes/data/sets/nuscenes/' + image_path)  # Reads the image from the path
-            plt.imshow(img)  # Displays the image
-            plt.axis('off')  # Hides the axis
-            plt.show()
+            #img = mpimg.imread('/home/saramontese/Desktop/MasterThesis/example/nuscenes/data/sets/nuscenes/' + image_path)  # Reads the image from the path
+            #plt.imshow(img)  # Displays the image
+            #plt.axis('off')  # Hides the axis
+            #plt.show()
 
             ######################################################
 
@@ -200,19 +207,30 @@ class AVDiscretizer():
             # Get identifiers for the current state and action
             current_state_id = self.get_state_identifier()
 
-            action_id = action.value#Action.index(action)
+            #TODO: update action_id = action.value#Action.index(action)
         
             #trajectory.append((current_state_id, action_id))
             trajectory.append(current_state_id)
-            trajectory.append(action_id)
+            #TODO: update how to append actions trajectory.append(action_id)
 
         return trajectory
     
 
-    @staticmethod
-    def is_close(a, b, eps=0.1):
-        return abs(a - b) < eps
+    #TODO: change location and definition of this function
+    #def retrieve_sample_image(self, df, instance_token):
+        '''
+            Args:
+            df: DataFrame of instances
+            instance_token: Instance that needs to be detected or tracked by an AV
 
+            Return:
+            Lidar and front camera images of the AV
+        '''
+        #nuscenes = 
+        #return self.nuscenes.render_sample(instance_token)
+
+
+    
     def determine_action(self, current_state, next_state, eps=None) -> int:
         
         '''
@@ -225,44 +243,49 @@ class AVDiscretizer():
             Return:
             ID numbers of actions performed
         '''
-        pos_t, vel_t, rot_t, rot_rate_t, acc_t = current_state
-        pos_t1, vel_t1, rot_t1, rot_rate_t1, acc_t1 = next_state
+        pos_t, vel_t, _, _, _ = current_state
+        pos_t1, vel_t1, _, rot_rate_t1, acc_t1 = next_state
         
-        x_t, y_t, z_t= pos_t[0], pos_t[1], pos_t[2]
-        x_t1, y_t1, z_t1= pos_t1[0], pos_t1[1], pos_t1[2]
+        x_t, y_t, _= pos_t[0], pos_t[1], pos_t[2]
+        x_t1, y_t1, _= pos_t1[0], pos_t1[1], pos_t1[2]
         
         # Calculate differences
-        x_diff = x_t1 - x_t
-        y_diff = y_t1 - y_t
-        z_diff = z_t1 - z_t
-        vel_diff = vel_t1 - vel_t
-        rot_diff = rot_t1 - rot_t
-        #acc_diff = acc_t1 - acc_t
+        dt = 0.5
+        x_diff = (x_t1 - x_t)/dt
+        y_diff = (y_t1 - y_t)/dt
+        #z_diff = (z_t1 - z_t)/dt
+        vel_diff = (vel_t1 - vel_t)/dt
+        #rot_diff = rot_t1 - rot_t
 
         #set epsilon (to be done in __init__?)
-        eps_rot = 0.1
+        #eps_rot = 0.02
         eps_vel = 0.2
         eps_pos = 0.2
         #eps_acc = 2
 
         actions = set()
         
+        # Check for IDLE condition first
         if self.is_close(x_diff, 0, eps_pos) and self.is_close(y_diff, 0, eps_pos) and self.is_close(vel_diff, 0, eps_vel):
             actions.add(Action.IDLE)
-        if vel_diff > eps_vel and self.is_close(rot_diff, 0, eps_rot) and y_diff < eps_pos: 
-            actions.add(Action.GAS)
-        if vel_diff < -eps_vel and self.is_close(rot_diff, 0, eps_rot) and y_diff < eps_pos:
-            actions.add(Action.BRAKE)
-        if rot_diff > eps_rot:
+        # Movement and rotation logic
+        elif y_diff < - eps_pos:
+            if vel_diff > eps_vel: # and self.is_close(rot_diff, 0, eps_rot):
+                actions.add(Action.GAS)
+            elif vel_diff < -eps_vel: # and self.is_close(rot_diff, 0, eps_rot):
+                actions.add(Action.BRAKE)
+            #else: 
+            #    actions.add(Action.STRAIGHT) #goes ahead at same pace
+            if rot_rate_t1 > 0 :#eps_rot:
                 actions.add(Action.TURN_RIGHT)
-        if rot_diff < -eps_rot:
+            elif rot_rate_t1 < 0: #-eps_rot:
                 actions.add(Action.TURN_LEFT)
-        if y_diff > eps_pos:
+            #elif  rot_rate_t1 == 0 and self.is_close(vel_diff, 0, eps_vel):
+                
+        elif y_diff > eps_pos: 
             actions.add(Action.REVERSE)
-        if x_diff > eps and self.is_close(rot_diff, 0, eps_rot) and self.is_close(vel_diff,0, eps_vel):
-            actions.add(Action.STRAIGHT)
 
-        # If no specific actions were added, assume IDLE as a fallback
+        # Fallback to IDLE if no other actions are determined, ensuring it's not added if other actions exist
         if not actions:
             actions.add(Action.IDLE)
 
