@@ -43,8 +43,8 @@ class TransitionRecorded:
             action = trajectories[i+1]
             next_state = trajectories[i+2]
             self.record_transition(current_state, next_state, action)
-            print(i)
-        #record also last state
+
+        #increment count of last state
         self.record_transition(trajectories[len(trajectories)-1], None, None)
 
         self.save_to_csv(states_info, path)
