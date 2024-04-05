@@ -61,7 +61,7 @@ class PolicyGraph(nx.MultiDiGraph):
                     'probability': state_prob,
                     'frequency': state_freq
                 }
-                pg.add_node(node_info[int(state_id)]['value'],
+                pg.add_node(node_info[int(state_id)]['value'], 
                             probability=state_prob,
                             frequency=state_freq)
 

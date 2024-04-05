@@ -1,6 +1,6 @@
 import gym
 from typing import Optional, Any, Tuple
-from pgeon import Environment
+from pgeon.environment import Environment
 import numpy as np
 
 SECONDS_PER_EPISODE = 10
@@ -12,7 +12,7 @@ STEER_MAX = 1.0
 
 class SelfDrivingEnvironment(Environment):
 
-    def __init__(self, sensor_dim, history_length, action_space_low, action_space_high):
+    def __init__(self, sensor_dim = 0, history_length=0, action_space_low=0, action_space_high=0):
         self.sensor_dim = sensor_dim
         self.history_length = history_length
         self.action_space_low = action_space_low
@@ -23,8 +23,8 @@ class SelfDrivingEnvironment(Environment):
                           np.array([THROTTLE_MAX, STEER_MAX]), dtype=np.float32)  # Example action space
        
         #observation space 
-       self.observation_space = gym.spaces.Box(low=0, high=255,
-                        shape=(self.img_height, self.img_width, 3), dtype=np.uint8)
+        #self.observation_space = gym.spaces.Box(low=0, high=255,
+                        #shape=(self.img_height, self.img_width, 3), dtype=np.uint8)
         '''
         # (includes history buffer)
         self.observation_space = gym.spaces.Dict(
@@ -40,8 +40,8 @@ class SelfDrivingEnvironment(Environment):
         )'''
 
         # Initialize history buffer and state
-        self.sensor_history = np.zeros((self.history_length, self.sensor_dim))
-        self.state = None
+        #self.sensor_history = np.zeros((self.history_length, self.sensor_dim))
+        #self.state = None
 
 
 

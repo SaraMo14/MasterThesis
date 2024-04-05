@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # Define arguments
     parser.add_argument('--dataroot', required=True, type=str, help='Path to the nuScenes dataset directory.')
     parser.add_argument('--dataoutput', required=True, type=str, help='Path for the output CSV file directory.')
-    parser.add_argument('--version', required=True, type=str, help='Version of the nuScenes dataset to process.')
+    parser.add_argument('--version', required=True, type=str, help='Version of the nuScenes dataset to process.') #v1.0-mini, v1.0-trainval, etc. 
     parser.add_argument('--key_frames', required=False, type=lambda x: (str(x).lower() == 'true'), default=True, help='Flag to process key frames only (True/False).')
     parser.add_argument('--sensor', required=False, type=str, default="lidar", choices=["all", "lidar", "camera", "radar"], help='Specific sensor modality to filter for. Options: "all", "lidar", "camera", "radar".')
 
@@ -197,14 +197,9 @@ if __name__ == "__main__":
 #create map/predictions
 #paste prediciton_...
     
-#linux
-#python3 generate_dataset.py --dataroot 'data/sets/nuscenes' --version 'v1.0-mini'
+#load minidataset
+#python3 generate_dataset_from_ego.py --dataroot 'data/sets/nuscenes' --version 'v1.0-mini'
 
 
-
-
-
-
-#windows 
-#python3 C:\Users\sara_\Desktop\MasterThesis\pgeon-main\example\nuscenes\generate_dataset.py --dataroot 'data/sets/nuscenes' --version 'v1.0-mini' --split 'mini_train'
-
+#load full dataset
+#python3 generate_dataset_from_ego.py --dataroot /media/saramontese/Riccardo\ 500GB/NuScenesDataset/data/sets/nuscenes --version 'v1.0-trainval' --dataoutput /media/saramontese/Riccardo\ 500GB/NuScenesDataset/data/sets/nuscenes
