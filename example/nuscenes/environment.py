@@ -4,7 +4,6 @@ from pgeon.environment import Environment
 import numpy as np
 
 SECONDS_PER_EPISODE = 10
-
 THROTTLE_MIN = 0.0
 STEER_MIN= -1.0
 THROTTLE_MAX = 1.0
@@ -19,8 +18,8 @@ class SelfDrivingEnvironment(Environment):
         self.action_space_high = action_space_high
 
         #action space
-        self.action_space = gym.spaces.Box(np.array([THROTTLE_MIN, STEER_MIN]), 
-                          np.array([THROTTLE_MAX, STEER_MAX]), dtype=np.float32)  # Example action space
+        #self.action_space = gym.spaces.Box(np.array([THROTTLE_MIN, STEER_MIN]), 
+                          #np.array([THROTTLE_MAX, STEER_MAX]), dtype=np.float32)  # Example action space
        
         #observation space 
         #self.observation_space = gym.spaces.Box(low=0, high=255,
@@ -76,49 +75,4 @@ class SelfDrivingEnvironment(Environment):
         # Check for terminal conditions (e.g., collision, reaching destination)
         done = False
         info = {}  # Additional information for debugging
-
-        '''
-        if action == 0:
-            #self.vehichle
-            pass
-        elif action == 1:
-            pass
-        elif action == 2:
-            pass
-        elif action == 3:
-            pass
-        v = self.vehicle.get_velocity()
-        kmh = int(3.6*math.sqrt(v.x**2 + v.y**2 + v.z**2))
-        
-        if len(self.collision_hist) != 0:
-            done = True
-            reward = -200 
-        elif kmh < 50:
-            done = False
-            reward = -1
-
-        if self.episode_start + SECONDS_PER_EPISODE < time.time():
-            done = True
-
-        return self.front_camera, reward, done, None  #obs, reward, done, extra_info
-        '''
         return new_state, reward, done, info
-
-
-# Example usage
-if __name__ == "__main__":
-    sensor_dim = 100  # Example sensor dimension
-    history_length = 3  # Example history length
-    action_space_low = -1  # Example action space lower bound
-    action_space_high = 1  # Example action space upper bound
-
-    env = SelfDrivingEnvironment(
-        sensor_dim, history_length, action_space_low, action_space_high
-    )
-    state = env.reset()
-
-    for _ in range(10):
-        action = env.action_space.sample()
-        next_state, reward, done, info = env.step(action)
-        print(f"State: {state}, Action: {action}, Reward: {reward}, Done: {done}")
-        state = next_state
