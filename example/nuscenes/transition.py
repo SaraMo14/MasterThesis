@@ -13,13 +13,9 @@ class TransitionRecorded:
             self.transition_counter[current_state][action][next_state] += 1 
 
     def calculate_probabilities(self):
-        # Calculate state probabilities 
         total_states = sum(self.state_counter.values())
-
         state_probabilities = {state: count/total_states for state,count in self.state_counter.items()}
-    
-        #Calculate transition probabilities
-        
+            
         transition_probabilities = defaultdict(dict)
         # Iterate over each state and its corresponding actions in the transition counter.
         for state, actions in self.transition_counter.items():
@@ -36,7 +32,6 @@ class TransitionRecorded:
         return state_probabilities, transition_probabilities
     
 
-    #@staticmethod
     def process_and_save_transitions(self, trajectories, states_info, path = '.'):
         for i in range(0, len(trajectories)-2, 2):
             current_state = trajectories[i]
@@ -45,7 +40,7 @@ class TransitionRecorded:
             self.record_transition(current_state, next_state, action)
 
         #increment count of last state
-        self.record_transition(trajectories[len(trajectories)-1], None, None)
+        #self.record_transition(trajectories[len(trajectories)-1], None, None)
 
         self.save_to_csv(states_info, path)
 

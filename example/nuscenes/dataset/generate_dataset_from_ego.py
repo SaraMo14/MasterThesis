@@ -9,22 +9,16 @@ import utils
 
 def convert_coordinates(group: pd.DataFrame) -> pd.DataFrame:
     """
-    Converts the global coordinates of an object in each row to local displacements
-    relative to its previous position and orientation.
+    Converts the global coordinates of an object in each row to local displacement  relative to its previous position and orientation.
 
-    This function iterates through a DataFrame where each row represents an object's
-    state at a given time, including its position (x, y) and orientation (rotation).
-    It computes the local displacement (delta_local_x, delta_local_y) at each timestep,
-    using the position and orientation from the previous timestep as the reference frame.
+    This function iterates through a DataFrame where each row represents an object's state at a given time, including its position (x, y) and orientation (rotation).
+    It computes the local displacement (delta_local_x, delta_local_y) at each timestep, using the position and orientation from the previous timestep as the reference frame.
 
     Args:
-        group (DataFrame): A DataFrame containing the columns 'x', 'y', and 'rotation',
-                           where 'x' and 'y' represent global position coordinates, and
-                           'rotation' represents the object's orientation as a quaternion.
+        group (DataFrame): A DataFrame containing the columns 'x', 'y' (global position coordinates), and 'rotation' (object's orientation as a quaternion).
 
     Returns:
-        DataFrame: The input DataFrame with two new columns added ('delta_local_x' and
-                   'delta_local_y') that represent the local displacement relative to the
+        DataFrame: The input DataFrame with two new columns added ('delta_local_x' and 'delta_local_y') that represent the local displacement relative to the
                    previous position and orientation.
 
     Note:
@@ -80,7 +74,6 @@ def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
         This function handles cases where consecutive timestamps might be identical (time_diffs == 0)
         by avoiding division by zero and setting the respective dynamics values to NaN.
     """
-    # Calculate time differences in seconds
     time_diffs = group['timestamp'].diff().dt.total_seconds()
     
     # Handle potential division by zero for velocity and acceleration calculations
@@ -88,12 +81,14 @@ def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
     
     # Calculate displacement (Euclidean distance between consecutive points)
     displacements = group[['x', 'y']].diff().pow(2).sum(axis=1).pow(0.5)
+    
+    # Meters / second.
     group['velocity'] = displacements / valid_time_diffs
     
-    # Calculate acceleration (change in velocity over time)
+    # Meters / second^2.
     group['acceleration'] = group['velocity'].diff() / valid_time_diffs
     
-    # Calculate heading change rate (change in yaw over time)
+    # Radians / second.
     group['heading_change_rate'] = group['yaw'].diff() / valid_time_diffs
 
     return group
@@ -113,20 +108,13 @@ def process_scene_data(dataset: NuScenes, key_frame: bool, sensor: str) -> pd.Da
         pd.DataFrame: A DataFrame containing processed scene data with dynamics calculations.
     """
 
-
-    # Extract samples and sample data, filtering for key frames if specified
     sample = pd.DataFrame(dataset.sample)[['token', 'scene_token']].rename(columns={'token': 'sample_token'})
     sample_data = pd.DataFrame(dataset.sample_data).query(f"is_key_frame == {key_frame}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']]
-    
-    # Extract ego poses and expand translation list into separate columns
     ego_pose = pd.DataFrame(dataset.ego_pose).rename(columns={'token': 'ego_pose_token'})
-
-    # Convert translation to x, y columns
     ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
     
     merged_df = sample.merge(sample_data, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
 
-    # Filter for specific sensor data if not including all
     if sensor != 'all':
         calibrated_sensors = pd.DataFrame(dataset.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
         sensors = pd.DataFrame(dataset.sensor).rename(columns={'token': 'sensor_token'})
@@ -137,7 +125,6 @@ def process_scene_data(dataset: NuScenes, key_frame: bool, sensor: str) -> pd.Da
 
     merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw)
 
-    # Sort by 'scene_token' and 'timestamp' for chronological ordering
     merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
 
     # Group by 'scene_token' and calculate dynamics
@@ -153,7 +140,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Process nuScenes dataset and output processed data to CSV.")
     
-    # Define arguments
     parser.add_argument('--dataroot', required=True, type=str, help='Path to the nuScenes dataset directory.')
     parser.add_argument('--dataoutput', required=True, type=str, help='Path for the output CSV file directory.')
     parser.add_argument('--version', required=True, type=str, help='Version of the nuScenes dataset to process.') #v1.0-mini, v1.0-trainval, etc. 
@@ -166,13 +152,10 @@ if __name__ == "__main__":
 
     DATAROOT = Path(args.dataroot) #'/data/sets/nuscenes'
 
-    # Initialize nuScenes instance.
     nuscenes = NuScenes(args.version, dataroot=DATAROOT, verbose=True)
 
     states = process_scene_data(nuscenes, args.key_frames, args.sensor)
 
-
-    # Output the processed DataFrame to a CSV file.
     DATAOUTPUT = Path(args.dataoutput)
     output_csv_path = DATAOUTPUT / 'dataset_from_ego.csv'
     states.to_csv(output_csv_path, index=False) 

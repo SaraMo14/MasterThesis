@@ -28,9 +28,6 @@ class Position():
         self.x = x
         self.y = y
         #self.z = 0
-        #LEFT = auto()
-        #CENTER = auto()
-        #RIGHT = auto()
 
     def __str__(self) -> str:
         return f'Position({self.x}, {self.y})'
@@ -40,18 +37,12 @@ class Action(Enum):
   IDLE = auto() 
   TURN_LEFT = auto()
   TURN_RIGHT = auto()
-  GAS = auto() #car keeps going straight, but faster
-  BRAKE = auto() #car keeps going straight, but slower
-  GAS_AND_TURN_LEFT = auto()
-  GAS_AND_TURN_RIGHT = auto()
-  BRAKE_AND_TURN_LEFT = auto()
-  BRAKE_AND_TURN_RIGHT = auto()
+  GAS = auto() 
+  BRAKE = auto()
   REVERSE = auto()
   STRAIGHT = auto() #car keep going straight at same pace
 
-  #TODO:
-  #differentiate between sharp and slight accelaraion, turn ..
-  #lane keeping, preparing to lane change, and lane changing (more of intentations)
+  #TODO:differentiate between sharp and slight accelaraion, slight turn, ..., lane keeping, preparing to lane change, and lane changing (more of intentations)
 
 
 class AVDiscretizer():
@@ -74,17 +65,16 @@ class AVDiscretizer():
             (Action.BRAKE, Action.TURN_RIGHT): 10,
             (Action.BRAKE, Action.TURN_RIGHT): 11,
             (Action.BRAKE, Action.STRAIGHT): 12,
-            # Add other combinations as needed
         }
         
         self.velocity_thr = [0.2, 6, 11, 17, 22] #m/s while in km/h would be[0, 20, 40, 60, 80] 
         self.rotation_thr = [-1*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
-
+                             
         self.eps_rot = 0.2
         self.eps_vel = 0.5 #0.2
         self.eps_pos_x = 0.1
         self.eps_pos_y = 0.2
-        
+        #self.eps_heading_change = 0.02
     @staticmethod
     def is_close(a, b, eps=0.1):
         return abs(a - b) <= eps
@@ -93,7 +83,7 @@ class AVDiscretizer():
     def discretize_state(self,
                    state: np.ndarray
                    ) -> Tuple[Predicate, Predicate, Predicate]:
-        x, y, _, velocity, rotation = state 
+        x, y, velocity, rotation = state 
 
         pos_predicate = self.discretize_position((x,y))
         mov_predicate = self.discretize_speed(self.velocity_thr, velocity)
@@ -105,17 +95,15 @@ class AVDiscretizer():
 
     def discretize_position(self, position, chunk_size = 4):
         '''
-        Discretizes the position of a point (x, y) into chunks of specified size.
-        The position refers to the position of the LIDAR sensor on top of the vehicle, in the center.
+        Discretizes the position of a point (x, y) into chunks of specified size. The position refers to the position of the LIDAR sensor on top of the vehicle, in the center.
 
         Args:
-            x,y,z: The x,y and z-coordinate of the point.
-            chunk_size (float, optional): The size of each chunk in meters. Defaults to 4.
+            x,y: The x,y-coordinate of the point.
+            chunk_size: The size of each chunk in meters. Defaults to 4.
 
         Returns:
             Tuple[int, int]: The indices of the closest chunk in the x and y directions.
 
-            
         '''
         #Possible improvement: discretize based on lane-centric representation (Ref:https://hal.science/hal-01908175/document)
         x,y = position
@@ -137,10 +125,8 @@ class AVDiscretizer():
                 x_chunk_index-=1
             if y < y_midpoint: 
                 y_chunk_index-=1
-        #elif distance == chunk_size / 2:   
         #TODO: caso in cui è in un incrocio
         position = Position(x_chunk_index,y_chunk_index)
-        #return x_chunk_index, y_chunk_index
         return position 
 
     @staticmethod
@@ -157,6 +143,7 @@ class AVDiscretizer():
             if rotation <= threshold:  
                 return Rotation(i + 1)
         return Rotation.RIGHT  
+ 
     
     
     #def discretize_acceleration(self, acceleration):
@@ -175,8 +162,8 @@ class AVDiscretizer():
         """
         trajectory = []
 
-        state_to_be_discretized = ['x', 'y', 'z', 'velocity', 'yaw']
-        state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'yaw', 'heading_change_rate', 'acceleration', 'timestamp']
+        state_to_be_discretized = ['x', 'y', 'velocity', 'yaw']
+        state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'yaw', 'heading_change_rate', 'acceleration']
         n_states = len(states)
 
         for i in range(n_states-1):
@@ -204,8 +191,8 @@ class AVDiscretizer():
         discretized_last_state = self.discretize_state(last_state_to_discretize)
         last_state_str = self.state_to_str(discretized_last_state)
         last_state_id = self.add_unique_state(last_state_str)
-        trajectory.append(last_state_id)
-        
+        trajectory.extend([last_state_id, None, None])        
+
         return trajectory
 
 
@@ -221,14 +208,9 @@ class AVDiscretizer():
             Return:
             ID numbers of actions performed
         '''
-        delta_x0, delta_y0, vel_t, yaw, rot_rate_t0, acc_t0, t0 = current_state
-        delta_x1, delta_y1, vel_t1, yaw_t1, rot_rate_t1, acc_t1, t1 = next_state
+        delta_x0, delta_y0, vel_t, yaw, rot_rate_t0, acc_t0 = current_state
+        delta_x1, delta_y1, vel_t1, yaw_t1, rot_rate_t1, acc_t1 = next_state
         
-        
-        # Calculate differences
-        #dt = (t1-t0).total_seconds()
-        #rot_diff = (rot_rate_t1 - rot_rate_t0)/dt
-
         actions = set()
         
         # Check for IDLE condition first
@@ -259,8 +241,6 @@ class AVDiscretizer():
 
     def add_unique_state(self, state_str: str) -> int:
         """
-        Adds a new unique state to the unique_states dictionary if it doesn't already exist, assigning it the next available index.
-
         Args:
             state_str (str): The state string to be added or found in the unique states.
 
@@ -274,16 +254,13 @@ class AVDiscretizer():
     
 
     def get_action_id(self, actions):
-        """
-            Retrieve the unique code for a given set of actions.
-            
+        """            
             Args:
             actions (set of Action): The set of actions for which to retrieve the code.
             
             Returns:
             int: The unique code corresponding to the set of actions, or -1 if not found.
         """
-        # Convert the set to a sorted tuple since sets are unordered and cannot be used as dictionary keys directly
         actions_tuple = tuple(sorted(actions, key=lambda action: action.value))
         
         return self.unique_actions.get(actions_tuple, -1)
@@ -295,46 +272,21 @@ class AVDiscretizer():
                      ) -> str:
         return '&'.join(str(pred.value) for pred in state)
     
-    '''
-    def str_to_state(self, state_str: str) -> Tuple[Predicate, Predicate, Predicate]:
-        pos_str, vel_str, rot_str = state_str.split('&')
-        
-        # Assuming pos_str format is "Position(x,y,z)"
-        # Extracting numeric values for x, y, and z from the position string
-        pos_vals = pos_str.split('(')[1].rstrip(')').split(',')
-        x, y = map(float, pos_vals)  # Convert strings to floats
-        
-        # Create a Position object with x, y
-        pos_predicate = Position()
-        pos_predicate.x, pos_predicate.y = x, y
-
-        # Assuming vel and rot are still using Enum names directly
-        mov_predicate = Velocity[vel_str]
-        rot_predicate = Rotation[rot_str]
-
-        return (Predicate(Position, [pos_predicate]),
-                Predicate(Velocity, [mov_predicate]),
-                Predicate(Rotation, [rot_predicate]))
-
-    '''
+    
     def str_to_state(self, state_str: str) -> Tuple[Position, Velocity, Rotation]:
-        # Split the state string into its components
         pos_str, vel_str, rot_str = state_str.split('&')
         
-        # Extract the position values (assuming format is [(x, y)])
+        # Extract the position values (format is [(x, y)])
         pos_vals = pos_str.strip("[]()").split(',')
         x, y = map(int, pos_vals)  # Convert strings to integers
-        
-        # Create a Position object with x, y (assuming z is not provided and defaults to 0)
+    
         pos = Position(x, y)
         
-        # Extract the Velocity value (assuming format is [<Velocity.X: Y>])
-        # We strip out the non-numeric characters and extract the enum name
+        # Extract the Velocity value (format is [<Velocity.X: Y>])
         vel_enum_name = vel_str.split('.')[1].split(':')[0]
         vel = Velocity[vel_enum_name]
 
-        # Extract the Rotation value (assuming format is [<Rotation.X: Y>])
-        # Similar extraction process as for Velocity
+        # Extract the Rotation value (format is [<Rotation.X: Y>])
         rot_enum_name = rot_str.split('.')[1].split(':')[0]
         rot = Rotation[rot_enum_name]
 

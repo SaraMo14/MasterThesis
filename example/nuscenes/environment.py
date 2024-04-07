@@ -3,11 +3,7 @@ from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
 import numpy as np
 
-SECONDS_PER_EPISODE = 10
-THROTTLE_MIN = 0.0
-STEER_MIN= -1.0
-THROTTLE_MAX = 1.0
-STEER_MAX = 1.0
+
 
 class SelfDrivingEnvironment(Environment):
 
@@ -18,26 +14,11 @@ class SelfDrivingEnvironment(Environment):
         self.action_space_high = action_space_high
 
         #action space
-        #self.action_space = gym.spaces.Box(np.array([THROTTLE_MIN, STEER_MIN]), 
-                          #np.array([THROTTLE_MAX, STEER_MAX]), dtype=np.float32)  # Example action space
-       
+        
         #observation space 
-        #self.observation_space = gym.spaces.Box(low=0, high=255,
-                        #shape=(self.img_height, self.img_width, 3), dtype=np.uint8)
-        '''
+        
         # (includes history buffer)
-        self.observation_space = gym.spaces.Dict(
-            {
-                "sensor_data": gym.spaces.Box(
-                    low=0, high=1, shape=(self.history_length, self.sensor_dim)
-                ),
-                "ego_pose": gym.spaces.Box(low=-10, high=10, shape=(7,))  # Example
-                       #    "lidar_data": gym.spaces.Box(low=0, high=1, shape=(100, 3)),
-
-            }
-            
-        )'''
-
+        
         # Initialize history buffer and state
         #self.sensor_history = np.zeros((self.history_length, self.sensor_dim))
         #self.state = None
