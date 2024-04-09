@@ -261,6 +261,8 @@ class PolicyGraph(nx.MultiDiGraph):
 
         # Predicate not in PG
         if predicate not in self.nodes():
+            print(f'nodes: {self.nodes()}')
+            print(f"predicate {predicate} not in pg")
             # Nearest predicate not found -> Random action
             if predicate is None:
                 result = {action: 1 / len(self.discretizer.all_actions()) for action in self.discretizer.all_actions()}
@@ -605,7 +607,8 @@ class PGBasedPolicy(Agent):
         new_predicate = predicate
         while not self._is_predicate_in_pg_and_usable(new_predicate):
             new_predicate = next(nearest_state_generator)
-
+            print(f'nearest state: {new_predicate}')
+            break
         return new_predicate
 
     def _get_action(self,
@@ -620,6 +623,7 @@ class PGBasedPolicy(Agent):
             raise NotImplementedError
 
     def act_upon_discretized_state(self, predicate):
+        print(f'predicate is {predicate}')
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
             action_prob_dist = self._get_action_probability_dist(predicate)
         else:

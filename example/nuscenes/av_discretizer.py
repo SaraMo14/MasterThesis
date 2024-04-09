@@ -14,6 +14,10 @@ class Velocity(Enum):
   HIGH = auto()
   VERY_HIGH = auto()
 
+  def __str__(self):
+        # Customize the string representation
+        return f'{self.__class__.__name__}({self.name})'
+
 
 class Rotation(Enum):
   LEFT = auto()
@@ -21,6 +25,10 @@ class Rotation(Enum):
   FORWARD = auto()
   SLIGHT_RIGHT = auto()
   RIGHT = auto()
+
+  def __str__(self):
+        # Customize the string representation
+        return f'{self.__class__.__name__}({self.name})'
 
 
 class Position():
@@ -60,25 +68,6 @@ class AVDiscretizer(Discretizer):
         super(AVDiscretizer, self).__init__()
 
         self.unique_states: Dict[str, int] = {}
-        
-        '''
-        self.unique_actions=  {
-            (Action.IDLE,): 0,
-            (Action.GAS,): 1,
-            (Action.BRAKE,): 2,
-            (Action.TURN_RIGHT,): 3,
-            (Action.TURN_LEFT,): 4,
-            (Action.STRAIGHT,): 5,
-            (Action.REVERSE,): 6,
-            #combination - ORDER COUNTS
-            (Action.TURN_RIGHT,Action.GAS ): 7,
-            (Action.TURN_LEFT, Action.GAS): 8,
-            (Action.GAS, Action.STRAIGHT): 9,
-            (Action.TURN_RIGHT, Action.BRAKE): 10,
-            (Action.TURN_LEFT, Action.BRAKE): 11,
-            (Action.BRAKE, Action.STRAIGHT): 12,
-        }
-        '''
         self.velocity_thr = [0.2, 6, 11, 17, 22] #m/s while in km/h would be[0, 20, 40, 60, 80] 
         self.rotation_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
                              
@@ -88,6 +77,7 @@ class AVDiscretizer(Discretizer):
         self.eps_pos_x = 0.1
         self.eps_pos_y = 0.2
         #self.eps_heading_change = 0.02
+        
     @staticmethod
     def is_close(a, b, eps=0.1):
         return abs(a - b) <= eps
@@ -125,21 +115,20 @@ class AVDiscretizer(Discretizer):
         #we use np.floor to ensure that the index represents the chunk to the left of the point
 
         #calculate midpoint of the chunck
-        x_midpoint = (x_chunk_index+0.5) * chunk_size
-        y_midpoint = (y_chunk_index+0.5) * chunk_size
+        #x_midpoint = (x_chunk_index+0.5) * chunk_size
+        #y_midpoint = (y_chunk_index+0.5) * chunk_size
         
         #calculate Euclidean distance from coordinates to chunk midpoint
-        distance = np.sqrt((x-x_midpoint)**2+ (y-y_midpoint)**2)
+        #distance = np.sqrt((x-x_midpoint)**2+ (y-y_midpoint)**2)
 
         #if distance is greater than half the chunk size, assign to the closest chunk
-        if distance > chunk_size / 2:
-            if x < x_midpoint: 
-                x_chunk_index-=1
-            if y < y_midpoint: 
-                y_chunk_index-=1
+        #if distance > chunk_size / 2:
+        #    if x < x_midpoint: 
+        #        x_chunk_index-=1
+        #    if y < y_midpoint: 
+        #        y_chunk_index-=1
         #TODO: caso in cui è in un incrocio
-        position = Position(x_chunk_index,y_chunk_index)
-        return position 
+        return Position(x_chunk_index,y_chunk_index) 
 
     @staticmethod
     def discretize_speed(thresholds, speed) -> Velocity:
@@ -193,7 +182,8 @@ class AVDiscretizer(Discretizer):
 
             # Debugging print statements
             print(f'State {i}: {current_state_for_action}')
-            print(f'Discretized state: {i} {current_state_str}')
+            print(f'Discretized state: {i} {discretized_current_state}')
+            print(f' state to str: {i} {current_state_str}')
             print(f'Action: {action} id: {action_id}')
             print()
         
@@ -335,35 +325,25 @@ class AVDiscretizer(Discretizer):
     def get_action_id(self, action):
             return action.value
 
+
     def state_to_str(self,
                      state: Tuple[Predicate, Predicate, Predicate]
                      ) -> str:
 
-        return '&'.join(str(pred.value) for pred in state)
+        return '&'.join(str(pred) for pred in state)
 
-
-    
-    def str_to_state(self, state_str: str) -> Tuple[Position, Velocity, Rotation]:
+    def str_to_state(self, state_str: str) -> Tuple[Predicate, Predicate, Predicate]:
         pos_str, vel_str, rot_str = state_str.split('&')
         
-        # Extract the position values (format is [x, y])
-        #pos_vals = pos_str.strip("[]()").split(',')
-        pos_vals = pos_str.strip("[]").split(',')
-        x, y = map(int, pos_vals)  # Convert strings to integers
-    
-        pos = Position(x, y)
+        # Parsing the position
+        x, y = map(int, pos_str[len("Position("):-1].split(';'))
         
-        # Extract the Velocity value (format is [<Velocity.X: Y>])
-        vel_enum_name = vel_str.split('.')[1].split(':')[0]
-        vel = Velocity[vel_enum_name]
-
-        # Extract the Rotation value (format is [<Rotation.X: Y>])
-        rot_enum_name = rot_str.split('.')[1].split(':')[0]
-        rot = Rotation[rot_enum_name]
-
-        return (pos.x, pos.y), vel, rot
-
-
+        mov_predicate = Velocity[vel_str[:-1].split('(')[1]]
+        rot_predicate = Rotation[rot_str[:-1].split('(')[1]]
+        
+        return (Predicate(Position, [x, y]),
+                        Predicate(Velocity, [mov_predicate]),
+                        Predicate(Rotation, [rot_predicate]))
     #TODO: update
     def nearest_state_2(self, state, chunk_size = 4):
         og_position, og_velocity, og_angle = state
@@ -395,6 +375,7 @@ class AVDiscretizer(Discretizer):
                         if r != og_angle.value:
                             yield Predicate(Position, Position(new_x, new_y)), og_velocity, Predicate(Rotation, r)
 
+    #TODO: QUESTION: All the yielded state must exist already?
     def nearest_state(self, state):
         '''
         Find states closest (in terms of discretized values) to a given input state.
