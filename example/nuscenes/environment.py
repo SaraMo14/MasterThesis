@@ -28,7 +28,6 @@ class SelfDrivingEnvironment(Environment):
     # TODO Set seed
     def reset(self, seed: Optional[int] = None) -> Any:
         # Reset environment and history buffer
-        self.sensor_history = np.zeros((self.history_length, self.sensor_dim))
         self.state = {
             "sensor_data": self.sensor_history.copy(),
             "ego_pose": np.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]),  # Example
