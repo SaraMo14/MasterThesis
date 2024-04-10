@@ -15,7 +15,6 @@ class Velocity(Enum):
   VERY_HIGH = auto()
 
   def __str__(self):
-        # Customize the string representation
         return f'{self.__class__.__name__}({self.name})'
 
 
@@ -27,7 +26,6 @@ class Rotation(Enum):
   RIGHT = auto()
 
   def __str__(self):
-        # Customize the string representation
         return f'{self.__class__.__name__}({self.name})'
 
 
@@ -144,9 +142,7 @@ class AVDiscretizer(Discretizer):
             if rotation <= threshold:  
                 return Rotation(i + 1)
         return Rotation.RIGHT  
- 
-    
-    
+
     #def discretize_acceleration(self, acceleration):
       #Values Reference: https://pure.tue.nl/ws/portalfiles/portal/50922576/matecconf_aigev2017_01005.pdf
 
@@ -198,16 +194,6 @@ class AVDiscretizer(Discretizer):
         return trajectory
 
     def determine_action(self, current_state, next_state) -> Action:
-        '''
-        Given full state(t) and state(t+1), returns the inferred action.
-        
-        Args:
-            current_state: undiscretized state(t)
-            next_state: undiscretized state(t+1)
-        
-        Return:
-            Action: The inferred action performed
-        '''
         delta_x0, delta_y0, vel_t, rot_rate_t0, acc_t0 = current_state
         delta_x1, delta_y1, vel_t1, rot_rate_t1, acc_t1 = next_state
 
@@ -233,7 +219,6 @@ class AVDiscretizer(Discretizer):
         else:
             dir_action = Action.STRAIGHT
 
-        # Combine acceleration and direction
         if acc_action == Action.GAS and dir_action == Action.TURN_RIGHT:
             return Action.GAS_TURN_RIGHT
         elif acc_action == Action.GAS and dir_action == Action.TURN_LEFT:
@@ -250,7 +235,7 @@ class AVDiscretizer(Discretizer):
             # Fallback to direction if no acceleration action was determined
             return dir_action
 
-        # Default fallback if no other conditions met
+        # if no other conditions met
         return Action.IDLE
 
     '''
@@ -297,31 +282,11 @@ class AVDiscretizer(Discretizer):
     '''
 
     def add_unique_state(self, state_str: str) -> int:
-        """
-        Args:
-            state_str (str): The state string to be added or found in the unique states.
-
-        Returns:
-            int: The index (ID) of the state in the unique_states dictionary.
-        """
         if state_str not in self.unique_states:
             self.unique_states[state_str] = len(self.unique_states)
         return self.unique_states[state_str]
 
     
-    '''
-    def get_action_id(self, actions):
-        """            
-            Args:
-            actions (set of Action): The set of actions for which to retrieve the code.
-            
-            Returns:
-            int: The unique code corresponding to the set of actions, or -1 if not found.
-        """
-        actions_tuple = tuple(sorted(actions, key=lambda action: action.value))
-        return self.unique_actions.get(actions_tuple, -1)
-    '''
-
     def get_action_id(self, action):
             return action.value
 
@@ -335,8 +300,7 @@ class AVDiscretizer(Discretizer):
     def str_to_state(self, state_str: str) -> Tuple[Predicate, Predicate, Predicate]:
         pos_str, vel_str, rot_str = state_str.split('&')
         
-        # Parsing the position
-        x, y = map(int, pos_str[len("Position("):-1].split(';'))
+        x, y = map(int, pos_str[len("Position("):-1].split(','))
         
         mov_predicate = Velocity[vel_str[:-1].split('(')[1]]
         rot_predicate = Rotation[rot_str[:-1].split('(')[1]]
@@ -344,18 +308,22 @@ class AVDiscretizer(Discretizer):
         return (Predicate(Position, [x, y]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]))
-    #TODO: update
-    def nearest_state_2(self, state, chunk_size = 4):
+    
+    
+    def nearest_state(self, state, chunk_size = 4):
+        #TODO: put chunk size as varible of the discretizer?
+        #TODO: QUESTION: All the yielded state must exist already?
+
         og_position, og_velocity, og_angle = state
-        print(og_velocity.value)
+        
+        x,y = og_position.value
         # Generate nearby positions considering discretization
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
-                new_x, new_y = self.discretize_position((og_position.x + dx * self.chunk_size, og_position.y + dy * self.chunk_size), self.chunk_size)
-                if (new_x, new_y) != (og_position.x, og_position.y):
-                    yield Predicate(Position, Position(new_x, new_y)), og_velocity, og_angle
+                new_x,new_y = x + dx * chunk_size, y + dy * chunk_size
+                if (new_x, new_y) != (x, y):
+                    yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle
 
-        # Single-variable changes for velocity and rotation
         for v in Velocity:
             if v != og_velocity.value:
                 yield og_position, Predicate(Velocity, v), og_angle
@@ -363,62 +331,23 @@ class AVDiscretizer(Discretizer):
             if r != og_angle.value:
                 yield og_position, og_velocity, Predicate(Rotation, r)
 
-        # Combining position change with either velocity or rotation change
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                new_x, new_y = self.discretize_position((og_position.x + dx * self.chunk_size, og_position.y + dy * self.chunk_size), self.chunk_size)
-                if (new_x, new_y) != (og_position.x, og_position.y):
+        for dx in [-2, -1, 0, 1, 2]:
+            for dy in [-2, -1, 0, 1, 2]:
+                new_x,new_y = x + dx * chunk_size, y + dy * chunk_size
+
+                if (new_x, new_y) != (x, y):
                     for v in Velocity:
                         if v != og_velocity.value:
-                            yield Predicate(Position, Position(new_x, new_y)), Predicate(Velocity, v), og_angle
+                            yield Predicate(Position, [new_x, new_y]), Predicate(Velocity, v), og_angle
                     for r in Rotation:
                         if r != og_angle.value:
-                            yield Predicate(Position, Position(new_x, new_y)), og_velocity, Predicate(Rotation, r)
-
-    #TODO: QUESTION: All the yielded state must exist already?
-    def nearest_state(self, state):
-        '''
-        Find states closest (in terms of discretized values) to a given input state.
-        
-        1.Iterate Over Single Variable Changes:
-
-        It loops through all possible values in Position (x,y). If the current position value doesn't match the value being iterated upon, it creates a new state with the different position value but keeps the original velocity and rotation values. This creates states that differ only in position from the input state.
-        Similarly, it performs the same process for Velocity and Roation to find states that differ only in velocity or angle, respectively.
-        
-        
-        2.Iterate Over Combinations of Two Variable Changes:
-
-        After checking single variable changes, the function iterates through all possible combinations of two variables (position, velocity, and angle). For each combination, it checks if both values in the original state match the current combination.
-        If there's a mismatch in only one variable, it creates a new state with the different value from the current combination while keeping the other two variables the same as the original state.
-        '''
-        
-        og_position, og_velocity, og_angle = state
-        
-        #for e in Position:
-            #if [e] != og_position.value:
-                #yield Predicate(Position, [e]), og_velocity, og_angle
-        for e in Velocity:
-            if [e] != og_velocity.value:
-                yield og_position, Predicate(Velocity, [e]), og_angle
-        for e in Rotation:
-            if [e] != og_angle.value:
-                yield og_position, og_velocity, Predicate(Rotation, [e])
-
-        #for e in Position:
-        for f in Velocity:
-            for g in Rotation:
-                amount_of_equals_to_og = \
-                    int([f] == og_velocity.value) + int([g] == og_angle.value)
-                    #int([e] == og_position.value) + int([f] == og_velocity.value) + int([g] == og_angle.value)
-                if amount_of_equals_to_og <= 1:
-                    yield Predicate(Position, [e]), Predicate(Velocity, [f]), Predicate(Rotation, [g])
-
+                            yield Predicate(Position, [new_x, new_y]), og_velocity, Predicate(Rotation, r)
 
 
     def all_actions(self):
         return list(Action) 
         
-    
+    #TODO: update
     def get_predicate_space(self):
         all_tuples = []
 

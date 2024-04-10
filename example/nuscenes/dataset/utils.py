@@ -30,8 +30,6 @@ def heading_change_rate(current_yaw, prev_yaw, time_diff: float) -> float:
     """
     if time_diff == 0:
         return np.NaN
-    #current_yaw = quaternion_yaw(current_rotation)
-    #prev_yaw = quaternion_yaw(prev_rotation)
 
     return (current_yaw- prev_yaw) / time_diff
 

@@ -20,7 +20,7 @@ class Predicate:
 
     def __str__(self):
         # Handle both Enums and ints in value
-        values_str = ";".join(self.format_value(val) for val in self.value)
+        values_str = ",".join(self.format_value(val) for val in self.value)
         return f'{self.predicate.__name__}({values_str})'
 
     def __repr__(self):

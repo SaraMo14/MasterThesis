@@ -30,7 +30,7 @@ class SelfDrivingEnvironment(Environment):
         # Reset environment and history buffer
         self.state = {
             "sensor_data": self.sensor_history.copy(),
-            "ego_pose": np.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]),  # Example
+            "ego_pose": np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),  # Example
         }
         return self.state
 

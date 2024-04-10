@@ -48,7 +48,6 @@ class TransitionRecorded:
 
     def save_to_csv(self, states_info, path="."):
         state_probabilities, transition_probabilities = self.calculate_probabilities()
-        #Save states
         states_file_path = os.path.join(path, 'nuscenes_nodes.csv')
         with open(states_file_path, 'w', newline='') as file:
             writer = csv.writer(file)
@@ -58,7 +57,7 @@ class TransitionRecorded:
                 predicate = next((state_str for state_str, id in states_info.items() if id == state_id), "")
                 writer.writerow([state_id, predicate, prob, self.state_counter[state_id]])
 
-        #Save states
+
         actions_file_path = os.path.join(path, 'nuscenes_edges.csv')
         with open(actions_file_path, 'w', newline='') as file:
             writer = csv.writer(file)

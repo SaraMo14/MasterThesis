@@ -261,8 +261,6 @@ class PolicyGraph(nx.MultiDiGraph):
 
         # Predicate not in PG
         if predicate not in self.nodes():
-            print(f'nodes: {self.nodes()}')
-            print(f"predicate {predicate} not in pg")
             # Nearest predicate not found -> Random action
             if predicate is None:
                 result = {action: 1 / len(self.discretizer.all_actions()) for action in self.discretizer.all_actions()}
@@ -288,7 +286,9 @@ class PolicyGraph(nx.MultiDiGraph):
         # Predicate has at least 1 out edge.
         if len(possible_actions) > 0:
             for _, action, v, weight in possible_actions:
-                result[self.discretizer.all_actions()[action]] += weight
+                #TODO: I subtract -1 since the Actions have id starting from 1 (it's an Enum). Is this correct?
+                #otherwise i get index out of bound error
+                result[self.discretizer.all_actions()[action-1]] += weight
             return sorted(result.items(), key=lambda x: x[1], reverse=True)
         # Predicate does not have out edges. Then return all the actions with same probability
         else:
@@ -387,15 +387,15 @@ class PolicyGraph(nx.MultiDiGraph):
         :param state: State
         :return: List of [Action, destination_state, difference]
         """
-        outs = self.out_edges(state, data=True)
+        outs = self.out_edges(state, data=True) #return all edges that start from current state
         outs = [(u, d['action'], v, d['probability']) for u, v, d in outs]
-
+        
         result = [(self.get_most_probable_option(v, greedy=greedy, verbose=verbose),
                    v,
                    self.substract_predicates(u, v)
                    ) for u, a, v, w in outs]
-
         result = sorted(result, key=lambda x: x[1])
+
         return result
 
     def question3(self, predicate, action, greedy=False, verbose=False):
@@ -415,13 +415,13 @@ class PolicyGraph(nx.MultiDiGraph):
         best_action = pg_policy.act_upon_discretized_state(predicate)
         result = self.nearby_predicates(predicate)
         explanations = []
-
         if verbose:
             print('I would have chosen:', best_action)
             print(f"I would have chosen {action} under the following conditions:")
         for a, v, diff in result:
             # Only if performs the input action
-            if a == action:
+            #changed a == action in a.value == action
+            if a.value == action:
                 if verbose:
                     print(f"Hypothetical state: {v}")
                     for predicate_key,  predicate_value in diff.items():
@@ -588,27 +588,31 @@ class PGBasedPolicy(Agent):
                                      predicate
                                      ) -> List[Tuple[int, float]]:
         # Precondition: self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
+        
+        # first apply to pg self.normalize(), since should be P(a | s ) = p (a and s)/p(s) but before was computed as P(a | s ) = p (a & s)
 
         action_weights = defaultdict(lambda: 0)
         for dest_node in self.pg[predicate]:
             for action in self.pg[predicate][dest_node]:
-                action_weights[action] += self.pg[predicate][dest_node][action]['probability']
-
-        action_weights = [(a, action_weights[a]) for a in action_weights]
+                action_weights[action] += self.pg[predicate][dest_node][action]['probability'] 
+        action_weights = [(a, action_weights[a]) for a in action_weights] #p(a and s)/p(s)
         return action_weights
 
     def _is_predicate_in_pg_and_usable(self, predicate) -> bool:
         return self.pg.has_node(predicate) and len(self.pg[predicate]) > 0
 
+    #modified
     def _get_nearest_predicate(self,
                                predicate
                                ):
         nearest_state_generator = self.pg.discretizer.nearest_state(predicate)
         new_predicate = predicate
-        while not self._is_predicate_in_pg_and_usable(new_predicate):
-            new_predicate = next(nearest_state_generator)
-            print(f'nearest state: {new_predicate}')
-            break
+        try:
+            while not self._is_predicate_in_pg_and_usable(new_predicate):
+                new_predicate = next(nearest_state_generator)
+        except StopIteration:
+            print("No nearest states available.")
+            new_predicate = None
         return new_predicate
 
     def _get_action(self,
@@ -618,12 +622,12 @@ class PGBasedPolicy(Agent):
             sorted_probs: List[Tuple[int, float]] = sorted(action_weights, key=lambda x: x[1], reverse=True)
             return sorted_probs[0][0]
         elif self.mode == PGBasedPolicyMode.STOCHASTIC:
+            p = [w for _, w in action_weights]
             return np.random.choice([a for a, _ in action_weights], p=[w for _, w in action_weights])
         else:
             raise NotImplementedError
-
+    #modified
     def act_upon_discretized_state(self, predicate):
-        print(f'predicate is {predicate}')
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
             action_prob_dist = self._get_action_probability_dist(predicate)
         else:
@@ -631,9 +635,15 @@ class PGBasedPolicy(Agent):
                 action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
             elif self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.FIND_SIMILAR_NODES:
                 nearest_predicate = self._get_nearest_predicate(predicate)
-                action_prob_dist = self._get_action_probability_dist(nearest_predicate)
+                if nearest_predicate is not None:  # Ensure nearest_predicate is found
+                    action_prob_dist = self._get_action_probability_dist(nearest_predicate)
+                else:
+                    # Fallback if no nearest predicate is found
+                    action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
             else:
                 raise NotImplementedError
+        
+        print('action probability distribution: ', action_prob_dist)
 
         return self._get_action(action_prob_dist)
 
