@@ -6,6 +6,7 @@ import numpy as np
 
 
 class SelfDrivingEnvironment(Environment):
+    environment_name = "NuScenes Environemnt"
 
     def __init__(self, sensor_dim = 0, history_length=0, action_space_low=0, action_space_high=0):
         self.sensor_dim = sensor_dim
@@ -22,6 +23,17 @@ class SelfDrivingEnvironment(Environment):
         # Initialize history buffer and state
         #self.sensor_history = np.zeros((self.history_length, self.sensor_dim))
         #self.state = None
+
+
+
+
+    def compute_reward(self):
+        total_reward = 0
+
+        return total_reward
+
+
+
 
 
 

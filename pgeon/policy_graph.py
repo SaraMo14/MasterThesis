@@ -180,7 +180,7 @@ class PolicyGraph(nx.MultiDiGraph):
 
     def _normalize(self):
         weights = nx.get_node_attributes(self, 'frequency')
-        total_frequency = sum([weights[state] for state in weights])
+        total_frequency = sum([weights[state] for state in weights]) #total number of edges(?) in pg
         nx.set_node_attributes(self, {state: weights[state] / total_frequency for state in weights}, 'probability')
 
         for node in self.nodes:
@@ -589,13 +589,13 @@ class PGBasedPolicy(Agent):
                                      ) -> List[Tuple[int, float]]:
         # Precondition: self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
         
-        # first apply to pg self.normalize(), since should be P(a | s ) = p (a and s)/p(s) but before was computed as P(a | s ) = p (a & s)
+        # first apply to pg self.normalize(), since should be P(a | s ) = p (a, s)/p(s) but before was computed as P(a | s ) = p (a,s)
 
         action_weights = defaultdict(lambda: 0)
         for dest_node in self.pg[predicate]:
             for action in self.pg[predicate][dest_node]:
                 action_weights[action] += self.pg[predicate][dest_node][action]['probability'] 
-        action_weights = [(a, action_weights[a]) for a in action_weights] #p(a and s)/p(s)
+        action_weights = [(a, action_weights[a]) for a in action_weights] #p(a, s)/p(s)
         return action_weights
 
     def _is_predicate_in_pg_and_usable(self, predicate) -> bool:
@@ -643,8 +643,6 @@ class PGBasedPolicy(Agent):
             else:
                 raise NotImplementedError
         
-        print('action probability distribution: ', action_prob_dist)
-
         return self._get_action(action_prob_dist)
 
     def act(self,
@@ -653,3 +651,44 @@ class PGBasedPolicy(Agent):
         predicate = self.pg.discretizer.discretize(state)
         return self.act_upon_discretized_state(predicate)
 
+
+
+    def compute_reward(self, current_state, action, next_state):
+        """
+        #Ref: . Model-free deep reinforcement learning for urban autonomous driving [9]
+        Computes the reward for transitioning from the current_state to next_state via action.
+
+        Parameters:
+        - current_state: The current state of the agent.
+        - action: The action taken by the agent.
+        - next_state: The state resulting from the action.
+
+        Returns:
+        - A numeric reward value.
+        """
+        r_vel = min(current_state['speed'], 10-current_state['speed'])
+        r_angle = -0.5*((current_state['yaw'])**2)
+        r_coll = 0 #-10 if collision occurs
+        r_lane = 0 #-1 if leaving the lane, incurred if the distance between the ego vehicle’s center and the closest point on the
+                    #provided route’s polyline is greater than 2 m
+        c = -0.1 #if ego for stopping still/not reaches destination
+
+        reward = r_vel + r_angle + r_coll + r_lane
+
+        return reward
+
+
+#what to do: 
+#Hi Victor, 
+#I am writing you for an advice.
+#I computed the PG over the trajectories and now I am computing static metrics (entropy) to analyse it.
+#Professor Cortes told me to define rewards and penalties for the agent, in order to improve the existing PG-based policy. If I understood well, I have to update the probability of an action in the PG-based policy (based on the  defined rewards/penalties). 
+#I should do this separately for each scene: create a different agent with existing starting policy the PG-based policy. Then, fine-tune /modify the actions probabilities by using reward function, and output an improved version of the policy graph (for each agent? combine the ones of all agents?)
+#Problema: come posso testarlo? Sul DB non ci sono ‘bad’ behaviours dei drivers. Per testarlo potresti creare trajettorie casuali ?
+
+#Did you try a similar approach with your tests on Cartpole/Overcooked? 
+
+#in this case it would be also possible to compute the metric delta_R, even if I do not know about the environment.
+
+
+#Problema: come posso testarlo? Sul DB non ci sono ‘bad’ behaviours dei drivers. Per testarlo potresti creare trajettorie casuali ?

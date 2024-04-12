@@ -179,8 +179,7 @@ class AVDiscretizer(Discretizer):
             # Debugging print statements
             print(f'State {i}: {current_state_for_action}')
             print(f'Discretized state: {i} {discretized_current_state}')
-            print(f' state to str: {i} {current_state_str}')
-            print(f'Action: {action} id: {action_id}')
+            print(f'Action: {action}')
             print()
         
             trajectory.extend([current_state_id, action_id])        
@@ -197,13 +196,12 @@ class AVDiscretizer(Discretizer):
         delta_x0, delta_y0, vel_t, rot_rate_t0, acc_t0 = current_state
         delta_x1, delta_y1, vel_t1, rot_rate_t1, acc_t1 = next_state
 
-        # Initial checks for IDLE and REVERSE
         if self.is_close(delta_x1, 0, self.eps_pos_x) and self.is_close(delta_y1, 0, self.eps_pos_y) and self.is_close(vel_t, 0, self.eps_vel):
             return Action.IDLE
         if delta_y1 < -self.eps_pos_y:
             return Action.REVERSE
 
-        # Determine acceleration
+        # determine acceleration
         if acc_t1 > self.eps_acc:
             acc_action = Action.GAS
         elif acc_t1 < -self.eps_acc:
@@ -211,7 +209,7 @@ class AVDiscretizer(Discretizer):
         else:
             acc_action = None
 
-        # Determine direction
+        # determine direction
         if delta_x1 > self.eps_pos_x:
             dir_action = Action.TURN_RIGHT
         elif delta_x1 < -self.eps_pos_x:
@@ -232,7 +230,7 @@ class AVDiscretizer(Discretizer):
         elif acc_action == Action.BRAKE and dir_action == Action.STRAIGHT:
             return Action.BRAKE_STRAIGHT
         elif acc_action is None:
-            # Fallback to direction if no acceleration action was determined
+            # fallback to direction if no acceleration action was determined
             return dir_action
 
         # if no other conditions met
