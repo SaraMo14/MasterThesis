@@ -14,6 +14,7 @@ from pgeon.agent import Agent
 from pgeon.discretizer import Discretizer
 
 
+
 class PolicyGraph(nx.MultiDiGraph):
 
     ######################
@@ -79,10 +80,11 @@ class PolicyGraph(nx.MultiDiGraph):
                 freq = int(freq)
 
                 pg.add_edge(node_info[node_from]['value'], node_info[node_to]['value'], key=action,
-                            frequency=freq, probability=prob, action=action)
+                            frequency=freq, probability=prob, action=action, reward=environment.compute_reward(node_info[node_from]['value'], action, node_info[node_to]['value']))
 
         pg._is_fit = True
         return pg
+
 
     @staticmethod
     def from_nodes_and_trajectories(path_nodes: str,
@@ -547,6 +549,99 @@ class PolicyGraph(nx.MultiDiGraph):
             raise NotImplementedError
 
 
+
+    ######################
+    # FINE-TUNING/POLICY IMPROVEMENT
+    ######################
+
+    def policy_iteration(self, scene_data=None, gamma=0.99, theta=5):
+        
+        is_policy_stable = False
+
+        iteration_count = 0
+        with tqdm.tqdm(total=None, desc='Policy Iteration Progress') as pbar:
+
+            while not is_policy_stable:
+                #policy evaluation
+                V = self.policy_evaluation(gamma,theta)
+
+                #policy improvement
+                is_policy_stable, policy = self.policy_improvement(V, gamma)
+                iteration_count += 1
+                pbar.update(1)
+                
+        self._update_policy_graph(policy)
+        self._is_fit = True
+        print(f"Policy iteration completed in {iteration_count} iterations.")
+
+    
+
+    def policy_evaluation(self, gamma, theta):
+        """
+        Computes the value function for the current policy.
+        """
+        V = defaultdict(float)
+        while True:
+            delta = 0
+            for state in tqdm.tqdm(self.nodes(), desc='Policy Evaluation', leave=False):#self.nodes():
+                v = V[state]  
+                V[state] = sum([self.get_edge_data(state, next_state, action)['probability']*
+                                (self.get_edge_data(state, next_state, action)['reward'] + gamma * V[next_state])
+                                for next_state in self[state] for action in self.get_edge_data(state, next_state)])
+                delta = max(delta, abs(v-V[state]))
+
+            if delta < theta:
+                break
+        return V
+    
+    def policy_improvement(self, V, gamma):
+        """
+        Updates the policy based on the value function.
+        """
+        policy_stable = True
+        policy = defaultdict(lambda: defaultdict(float))
+        for state in tqdm.tqdm(self.nodes(), desc='Policy Improvement', leave=False):#self.nodes:
+            #compute action value for each action from this state
+            action_values = {}
+            for current_state, next_state, data in self.out_edges(state, data=True):
+                reward = data['reward']
+                action = data['action']
+                action_value = reward + gamma*V[next_state]
+                action_values[action] = action_value
+
+            best_action = max(action_values, key=action_values.get)
+        
+            #update poliy to choose the best action with probability 1
+            for action in action_values.keys():
+                if action == best_action:
+                    policy[state][action] = 1.0
+                else:
+                    policy[state][action] = 0.0
+            
+            if self[state]!=policy[state]:
+                policy_stable = False
+            
+            return policy_stable, policy
+
+    def _update_policy_graph(self,policy):
+        """
+        Updates the policy graph based on the improved policy.
+        """
+        for state in policy:
+            for action in policy[state]:
+                #update edge probabilities based on the improved policy
+                for next_state in self[state]:
+                    if self.has_edge(state, next_state, key=action):
+                        self[state][next_state][action]['probability']= policy[state][action]
+
+
+
+
+
+
+
+
+
 class PGBasedPolicyMode(Enum):
     GREEDY = auto()
     STOCHASTIC = auto()
@@ -563,6 +658,8 @@ class PGBasedPolicy(Agent):
                  mode: PGBasedPolicyMode,
                  node_not_found_mode: PGBasedPolicyNodeNotFoundMode = PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM
                  ):
+        
+        
         self.pg = policy_graph
         assert mode in [PGBasedPolicyMode.GREEDY, PGBasedPolicyMode.STOCHASTIC], \
             'mode must be a member of the PGBasedPolicyMode enum!'
@@ -652,43 +749,7 @@ class PGBasedPolicy(Agent):
         return self.act_upon_discretized_state(predicate)
 
 
-
-    def compute_reward(self, current_state, action, next_state):
-        """
-        #Ref: . Model-free deep reinforcement learning for urban autonomous driving [9]
-        Computes the reward for transitioning from the current_state to next_state via action.
-
-        Parameters:
-        - current_state: The current state of the agent.
-        - action: The action taken by the agent.
-        - next_state: The state resulting from the action.
-
-        Returns:
-        - A numeric reward value.
-        """
-        r_vel = min(current_state['speed'], 10-current_state['speed'])
-        r_angle = -0.5*((current_state['yaw'])**2)
-        r_coll = 0 #-10 if collision occurs
-        r_lane = 0 #-1 if leaving the lane, incurred if the distance between the ego vehicle’s center and the closest point on the
-                    #provided route’s polyline is greater than 2 m
-        c = -0.1 #if ego for stopping still/not reaches destination
-
-        reward = r_vel + r_angle + r_coll + r_lane
-
-        return reward
+   
 
 
-#what to do: 
-#Hi Victor, 
-#I am writing you for an advice.
-#I computed the PG over the trajectories and now I am computing static metrics (entropy) to analyse it.
-#Professor Cortes told me to define rewards and penalties for the agent, in order to improve the existing PG-based policy. If I understood well, I have to update the probability of an action in the PG-based policy (based on the  defined rewards/penalties). 
-#I should do this separately for each scene: create a different agent with existing starting policy the PG-based policy. Then, fine-tune /modify the actions probabilities by using reward function, and output an improved version of the policy graph (for each agent? combine the ones of all agents?)
-#Problema: come posso testarlo? Sul DB non ci sono ‘bad’ behaviours dei drivers. Per testarlo potresti creare trajettorie casuali ?
-
-#Did you try a similar approach with your tests on Cartpole/Overcooked? 
-
-#in this case it would be also possible to compute the metric delta_R, even if I do not know about the environment.
-
-
-#Problema: come posso testarlo? Sul DB non ci sono ‘bad’ behaviours dei drivers. Per testarlo potresti creare trajettorie casuali ?
+    

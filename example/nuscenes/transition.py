@@ -32,7 +32,7 @@ class TransitionRecorded:
         return state_probabilities, transition_probabilities
     
 
-    def process_and_save_transitions(self, trajectories, states_info, path = '.'):
+    def process_transitions(self, trajectories):#, states_info, path = '.'):
         for i in range(0, len(trajectories)-2, 2):
             current_state = trajectories[i]
             action = trajectories[i+1]
@@ -42,7 +42,7 @@ class TransitionRecorded:
         #increment count of last state
         #self.record_transition(trajectories[len(trajectories)-1], None, None)
 
-        self.save_to_csv(states_info, path)
+        #self.save_to_csv(states_info, path)
 
 
 

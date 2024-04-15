@@ -6,6 +6,9 @@ class PolicyGraphEvaluator:
     def __init__(self, policy_graph: PolicyGraph):
         self.policy_graph = policy_graph
 
+
+
+
     def compute_entropy_metrics(self):
         """
         Compute the entropy metrics for the Policy Graph.
@@ -26,10 +29,8 @@ class PolicyGraphEvaluator:
                 action_freq[action] += freq
                 total_action_freq += freq
             
-            # Calculate Ha(s) for each state
             Ha = sum(-(freq / total_action_freq) * log2(freq / total_action_freq) for freq in action_freq.values())
 
-            # Calculate Hw(s) for each state
             Hw = 0
             for action, freq in action_freq.items():
                 P_a_given_s = freq / total_action_freq
@@ -38,19 +39,33 @@ class PolicyGraphEvaluator:
                     prob = data['probability']
                     Hw -= P_a_given_s * prob * log2(prob)
 
-            # Calculate H(s) as Ha(s) + Hw(s)
             Hs = Ha + Hw
 
             entropy_metrics[state] = {'Hs': Hs, 'Ha': Ha, 'Hw': Hw}
         
         return entropy_metrics
         
+    def compute_scene_reward(self, trajectories):
+        #TODO: handle discretize state before computing reward,
+        #TODO: fix
+        ''' Given an episode/scene with trajectory [state, action, next_state, ...], computes the average reward.'''
 
-    def evaluate_static_metrics(self):
-        # Implement static evaluation metrics here
+        tot_reward = 0
+        for i in range(0, len(trajectories)-2, 2):
+            current_state = trajectories[i]
+            action = trajectories[i+1]
+            next_state = trajectories[i+2]
+            tot_reward += self.policy_graph.compute_reward(current_state, action, next_state)
+        return tot_reward
+
+    def calculate_tl(self):
+        """Calculates the Transferred Learning (TL) metric."""
         pass
 
-    def evaluate_intention_metrics(self, desires):
-        # Implement intention-based evaluation metrics here, utilizing `desires`
+    def calculate_std(self):
+        """Calculates the Standard Deviation (STD) metric."""
         pass
 
+    def calculate_ns(self):
+        """Calculates the New States (NS) visited metric."""
+        pass        
