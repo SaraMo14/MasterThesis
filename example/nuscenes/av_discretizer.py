@@ -96,35 +96,11 @@ class AVDiscretizer(Discretizer):
 
     def discretize_position(self, position, chunk_size = 4):
         '''
-        Discretizes the position of a point (x, y) into chunks of specified size. The position refers to the position of the LIDAR sensor on top of the vehicle, in the center.
-
-        Args:
-            x,y: The x,y-coordinate of the point.
-            chunk_size: The size of each chunk in meters. Defaults to 4.
-
-        Returns:
-            Tuple[int, int]: The indices of the closest chunk in the x and y directions.
-
-        '''
+        Discretizes the position of a point (x, y) into chunks of specified size. The position refers to the position of the LIDAR sensor on top of the vehicle, in the center. '''
         x,y = position
 
         x_chunk_index = int(np.floor(x / chunk_size)) #takes larger int <= (x/chunk_size)
         y_chunk_index = int(np.floor(y / chunk_size)) 
-        #we use np.floor to ensure that the index represents the chunk to the left of the point
-
-        #calculate midpoint of the chunck
-        #x_midpoint = (x_chunk_index+0.5) * chunk_size
-        #y_midpoint = (y_chunk_index+0.5) * chunk_size
-        
-        #calculate Euclidean distance from coordinates to chunk midpoint
-        #distance = np.sqrt((x-x_midpoint)**2+ (y-y_midpoint)**2)
-
-        #if distance is greater than half the chunk size, assign to the closest chunk
-        #if distance > chunk_size / 2:
-        #    if x < x_midpoint: 
-        #        x_chunk_index-=1
-        #    if y < y_midpoint: 
-        #        y_chunk_index-=1
         #TODO: caso in cui è in un incrocio
         return Position(x_chunk_index,y_chunk_index) 
 
@@ -163,24 +139,32 @@ class AVDiscretizer(Discretizer):
         state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'heading_change_rate', 'acceleration']
         n_states = len(states)
 
+        previous_scene_token = states.iloc[0]['scene_token']
         for i in range(n_states-1):
+            current_scene_token = states.iloc[i]['scene_token']
+
             # discretize current state
             current_state_to_discretize = states.iloc[i][state_to_be_discretized].tolist()
             discretized_current_state = self.discretize(current_state_to_discretize)
             current_state_str = self.state_to_str(discretized_current_state)
             current_state_id = self.add_unique_state(current_state_str)
 
-            # Determine action based on the full state information
-            current_state_for_action = states.iloc[i][state_columns_for_action].tolist()
-            next_state_for_action = states.iloc[i+1][state_columns_for_action].tolist()
-            action = self.determine_action(current_state_for_action, next_state_for_action)
-            action_id = self.get_action_id(action)
+            #check if is scene destination state
+            if current_scene_token != previous_scene_token:
+                previous_scene_token = current_scene_token
+                action_id = None
+            else:
+                # Determine action based on the full state information
+                current_state_for_action = states.iloc[i][state_columns_for_action].tolist()
+                next_state_for_action = states.iloc[i+1][state_columns_for_action].tolist()
+                action = self.determine_action(current_state_for_action, next_state_for_action)
+                action_id = self.get_action_id(action)
 
-            # Debugging print statements
-            print(f'State {i}: {current_state_for_action}')
-            print(f'Discretized state: {i} {discretized_current_state}')
-            print(f'Action: {action}')
-            print()
+                # Debugging print statements
+                print(f'State {i}: {current_state_for_action}')
+                print(f'Discretized state: {i} {discretized_current_state}')
+                print(f'Action: {action}')
+                print()
         
             trajectory.extend([current_state_id, action_id])        
         #add last state
@@ -191,6 +175,9 @@ class AVDiscretizer(Discretizer):
         trajectory.extend([last_state_id, None, None])        
 
         return trajectory
+
+
+
 
     def determine_action(self, current_state, next_state) -> Action:
         delta_x0, delta_y0, vel_t, rot_rate_t0, acc_t0 = current_state
@@ -235,49 +222,6 @@ class AVDiscretizer(Discretizer):
 
         # if no other conditions met
         return Action.IDLE
-
-    '''
-    def determine_action(self, current_state, next_state) -> int:
-        
-        """
-            Given full state(t) and state(t+1), returns the inferred action.
-
-            Args:
-            current_state: undiscretized state(t)
-            next_state: undiscretized state(t+1)
-
-            Return:
-            ID numbers of actions performed
-        """
-        delta_x0, delta_y0, vel_t, rot_rate_t0, acc_t0 = current_state
-        delta_x1, delta_y1, vel_t1, rot_rate_t1, acc_t1 = next_state
-        
-        actions = set()
-        
-        if self.is_close(delta_x1, 0, self.eps_pos_x) and self.is_close(delta_y1, 0, self.eps_pos_y) and self.is_close(vel_t, 0, self.eps_vel): #TODO: should i say more about velocity?
-            actions.add(Action.IDLE)
-
-        elif delta_y1 > self.eps_pos_y:
-            if acc_t1 > self.eps_acc: 
-                actions.add(Action.GAS)
-            elif acc_t1 < -self.eps_acc: 
-                actions.add(Action.BRAKE)
-
-            if delta_x1 > self.eps_pos_x:
-                actions.add(Action.TURN_RIGHT)
-            elif delta_x1< -self.eps_pos_x:
-                actions.add(Action.TURN_LEFT)
-            else:
-                actions.add(Action.STRAIGHT)#elif  rot_rate_t1 == 0 and self.is_close(vel_diff, 0, eps_vel):
-                
-        elif delta_y1 < -self.eps_pos_y: 
-            actions.add(Action.REVERSE)
-
-        if not actions:
-            actions.add(Action.IDLE)
-
-        return actions
-    '''
 
     def add_unique_state(self, state_str: str) -> int:
         if state_str not in self.unique_states:

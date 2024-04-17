@@ -6,18 +6,21 @@ class TransitionRecorded:
         self.state_counter = defaultdict(int) # Tracks frequency of each state
         self.transition_counter = defaultdict(lambda: defaultdict(lambda: defaultdict(int))) # Tracks transitions with counts.
         # Structure: {state: {action: {next_state: count}}}
-        
+        self.destination_states = set()
+
     def record_transition(self, current_state, next_state, action):
         self.state_counter[current_state] +=1
-        if next_state is not None:
+        if action is not None:
             self.transition_counter[current_state][action][next_state] += 1 
+        else:
+            self.destination_states.add(current_state)
 
     def calculate_probabilities(self):
         total_states = sum(self.state_counter.values())
         state_probabilities = {state: count/total_states for state,count in self.state_counter.items()}
             
         transition_probabilities = defaultdict(dict)
-        # Iterate over each state and its corresponding actions in the transition counter.
+        
         for state, actions in self.transition_counter.items():
             # For each action, iterate over the next states and their counts.
             for action, transitions in actions.items():
@@ -39,11 +42,6 @@ class TransitionRecorded:
             next_state = trajectories[i+2]
             self.record_transition(current_state, next_state, action)
 
-        #increment count of last state
-        #self.record_transition(trajectories[len(trajectories)-1], None, None)
-
-        #self.save_to_csv(states_info, path)
-
 
 
     def save_to_csv(self, states_info, path="."):
@@ -51,11 +49,15 @@ class TransitionRecorded:
         states_file_path = os.path.join(path, 'nuscenes_nodes.csv')
         with open(states_file_path, 'w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(['id', 'value', 'p(s)', 'frequency'])
+            writer.writerow(['id', 'value', 'p(s)', 'frequency','is_destination'])
             for state_id, prob in state_probabilities.items():
                 #Finds the state string corresponding to the given state ID in a more concise way.
                 predicate = next((state_str for state_str, id in states_info.items() if id == state_id), "")
-                writer.writerow([state_id, predicate, prob, self.state_counter[state_id]])
+                if state_id in self.destination_states:
+                    writer.writerow([state_id, predicate, prob, self.state_counter[state_id], 1])
+                else:
+                    writer.writerow([state_id, predicate, prob, self.state_counter[state_id], 0])
+                
 
 
         actions_file_path = os.path.join(path, 'nuscenes_edges.csv')

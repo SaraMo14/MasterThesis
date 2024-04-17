@@ -14,7 +14,6 @@ from pgeon.agent import Agent
 from pgeon.discretizer import Discretizer
 
 
-
 class PolicyGraph(nx.MultiDiGraph):
 
     ######################
@@ -53,18 +52,20 @@ class PolicyGraph(nx.MultiDiGraph):
             csv_r = csv.reader(f)
             next(csv_r)
 
-            for state_id, value, prob, freq in csv_r:
+            for state_id, value, prob, freq, is_destination in csv_r:
                 state_prob = float(prob)
                 state_freq = int(freq)
 
                 node_info[int(state_id)] = {
                     'value': pg.discretizer.str_to_state(value),
                     'probability': state_prob,
-                    'frequency': state_freq
+                    'frequency': state_freq,
+                    'is_destination': is_destination
                 }
                 pg.add_node(node_info[int(state_id)]['value'], 
                             probability=state_prob,
-                            frequency=state_freq)
+                            frequency=state_freq,
+                            destination=is_destination)
 
         with open(f'{path_edges}{"" if path_to_edges_includes_csv else ".csv"}', 'r+') as f:
             csv_r = csv.reader(f)
@@ -78,10 +79,9 @@ class PolicyGraph(nx.MultiDiGraph):
                 action = int(action)
                 prob = float(prob)
                 freq = int(freq)
-
+                is_destination = True if node_info[node_to]['is_destination'] == '1' else False
                 pg.add_edge(node_info[node_from]['value'], node_info[node_to]['value'], key=action,
-                            frequency=freq, probability=prob, action=action, reward=environment.compute_reward(node_info[node_from]['value'], action, node_info[node_to]['value']))
-
+                            frequency=freq, probability=prob, action=action, reward=environment.compute_reward(node_info[node_from]['value'], action, node_info[node_to]['value'], is_destination))
         pg._is_fit = True
         return pg
 
@@ -551,78 +551,98 @@ class PolicyGraph(nx.MultiDiGraph):
 
 
     ######################
-    # FINE-TUNING/POLICY IMPROVEMENT
+    # POLICY ITERATION
     ######################
 
-    def policy_iteration(self, scene_data=None, gamma=0.99, theta=5):
-        
+    def policy_iteration(self, scene_policy, gamma=0.99, theta=0.01, n_iter=30):
+        '''
+        Compute policy iteration algorithm on the policy graph build on a single (or subset) of scenes.
+
+        Args:
+            - scene_data: a policy graph based on a scene
+            - gamma:
+            - thetha:
+
+        Improves on the original total policy.
+        '''
         is_policy_stable = False
 
         iteration_count = 0
         with tqdm.tqdm(total=None, desc='Policy Iteration Progress') as pbar:
 
             while not is_policy_stable:
+                
                 #policy evaluation
-                V = self.policy_evaluation(gamma,theta)
+                V = PolicyGraph.policy_evaluation(scene_policy, gamma,theta)
 
                 #policy improvement
-                is_policy_stable, policy = self.policy_improvement(V, gamma)
+                is_policy_stable, policy = PolicyGraph.policy_improvement(scene_policy, V, gamma)
                 iteration_count += 1
                 pbar.update(1)
-                
+
+                if iteration_count == n_iter:
+                    is_policy_stable = True
+
         self._update_policy_graph(policy)
         self._is_fit = True
         print(f"Policy iteration completed in {iteration_count} iterations.")
-
     
-
-    def policy_evaluation(self, gamma, theta):
+    
+    @staticmethod
+    def policy_evaluation(scene_policy, gamma, theta):
         """
         Computes the value function for the current policy.
         """
         V = defaultdict(float)
         while True:
             delta = 0
-            for state in tqdm.tqdm(self.nodes(), desc='Policy Evaluation', leave=False):#self.nodes():
+            for state in scene_policy.nodes():#self.nodes():
                 v = V[state]  
-                V[state] = sum([self.get_edge_data(state, next_state, action)['probability']*
-                                (self.get_edge_data(state, next_state, action)['reward'] + gamma * V[next_state])
-                                for next_state in self[state] for action in self.get_edge_data(state, next_state)])
+                V[state] = sum([scene_policy.get_edge_data(state, next_state, action)['probability']*
+                                (scene_policy.get_edge_data(state, next_state, action)['reward'] + gamma * V[next_state])
+                                for next_state in scene_policy[state] for action in scene_policy.get_edge_data(state, next_state)])
                 delta = max(delta, abs(v-V[state]))
-
             if delta < theta:
                 break
         return V
     
-    def policy_improvement(self, V, gamma):
+    @staticmethod
+    def policy_improvement(scene_policy, V, gamma):
         """
         Updates the policy based on the value function.
         """
         policy_stable = True
-        policy = defaultdict(lambda: defaultdict(float))
-        for state in tqdm.tqdm(self.nodes(), desc='Policy Improvement', leave=False):#self.nodes:
+        new_policy = defaultdict(lambda: defaultdict(float))
+        for state in scene_policy.nodes():#self.nodes:
+            
+            current_best_action = None
+
             #compute action value for each action from this state
             action_values = {}
-            for current_state, next_state, data in self.out_edges(state, data=True):
+            for current_state, next_state, data in scene_policy.out_edges(state, data=True):              
                 reward = data['reward']
                 action = data['action']
-                action_value = reward + gamma*V[next_state]
-                action_values[action] = action_value
+                action_values[action] = reward + gamma*V[next_state]
+            
+            if not action_values:
+                #print('No action starting from this state. Possibly the last state of the scene.')
+                continue
 
             best_action = max(action_values, key=action_values.get)
-        
-            #update poliy to choose the best action with probability 1
+
+            #update policy to choose the best action with probability 1
+            #TODO: stochastic approach
             for action in action_values.keys():
                 if action == best_action:
-                    policy[state][action] = 1.0
+                    new_policy[state][action] = 1.0
                 else:
-                    policy[state][action] = 0.0
-            
-            if self[state]!=policy[state]:
+                    new_policy[state][action] = 0.0
+                
+            if current_best_action != best_action:
                 policy_stable = False
-            
-            return policy_stable, policy
-
+                      
+        return policy_stable, new_policy
+        
     def _update_policy_graph(self,policy):
         """
         Updates the policy graph based on the improved policy.
@@ -633,8 +653,6 @@ class PolicyGraph(nx.MultiDiGraph):
                 for next_state in self[state]:
                     if self.has_edge(state, next_state, key=action):
                         self[state][next_state][action]['probability']= policy[state][action]
-
-
 
 
 

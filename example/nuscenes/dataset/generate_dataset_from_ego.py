@@ -126,12 +126,18 @@ def process_scene_data(dataset: NuScenes, key_frame: bool, sensor: str) -> pd.Da
     merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw)
 
     merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
-
+    
     # Group by 'scene_token' and calculate dynamics
     final_df = merged_df.groupby('scene_token', as_index=False).apply(calculate_dynamics).dropna()
 
     # Compute  for each scene, the movement of the agent in local x and y
     df_updated = pd.concat([convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
+
+    # mark destination state
+    #df_updated['is_destination'] = False
+    #for scene_token in df_updated['scene_token'].unique():
+    #    last_index = df_updated[df_updated['scene_token'] == scene_token].index[-1]
+    #    df_updated.at[last_index, 'is_destination'] = True
 
     return df_updated
 
