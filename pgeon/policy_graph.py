@@ -182,8 +182,8 @@ class PolicyGraph(nx.MultiDiGraph):
 
     def _normalize(self):
         weights = nx.get_node_attributes(self, 'frequency')
-        total_frequency = sum([weights[state] for state in weights]) #total number of edges(?) in pg
-        nx.set_node_attributes(self, {state: weights[state] / total_frequency for state in weights}, 'probability')
+        total_frequency = sum([weights[state] for state in weights]) #total number of edges in pg
+        nx.set_node_attributes(self, {state: weights[state] / total_frequency for state in weights}, 'probability') #coincide con p(s)
 
         for node in self.nodes:
             total_frequency = sum([self.get_edge_data(node, dest_node, action)['frequency']
@@ -240,12 +240,23 @@ class PolicyGraph(nx.MultiDiGraph):
             if verbose:
                 print('NEAREST PREDICATE of NON existing predicate:', input_predicate)
 
-            predicate_space = self.discretizer.get_predicate_space()
-            # TODO: Implement distance function
-            new_pred = random.choice(predicate_space)
+            nearest_state_generator = self.discretizer.nearest_state(input_predicate)
+            new_predicate = input_predicate
+            try:
+                while not self._is_predicate_in_pg_and_usable(new_predicate):
+                    new_predicate = next(nearest_state_generator)
+            except StopIteration:
+                print("No nearest states available.")
+                new_predicate = None
+
             if verbose:
-                print('\tNEAREST PREDICATE in PG:', new_pred)
-            return new_pred
+                print('\tNEAREST PREDICATE in PG:', new_predicate)
+            return new_predicate     
+        
+    
+
+
+
 
     def get_possible_actions(self, predicate):
         """ Given a predicate, get the possible actions and it's probabilities
@@ -267,12 +278,12 @@ class PolicyGraph(nx.MultiDiGraph):
             if predicate is None:
                 result = {action: 1 / len(self.discretizer.all_actions()) for action in self.discretizer.all_actions()}
                 return sorted(result.items(), key=lambda x: x[1], reverse=True)
-
+            print(f'PREDICATE BEF {predicate}')
             predicate = self.get_nearest_predicate(predicate)
             if predicate is None:
                 result = {a: 1 / len(self.discretizer.all_actions()) for a in self.discretizer.all_actions()}
                 return list(result.items())
-
+        print(f'PREDICATE AFTER {predicate}')
         # Out edges with actions [(u, v, a), ...]
         possible_actions = [(u, data['action'], v, data['probability'])
                             for u, v, data in self.out_edges(predicate, data=True)]
@@ -654,6 +665,8 @@ class PolicyGraph(nx.MultiDiGraph):
                     if self.has_edge(state, next_state, key=action):
                         self[state][next_state][action]['probability']= policy[state][action]
 
+    def _is_predicate_in_pg_and_usable(self, predicate) -> bool:
+        return self.has_node(predicate) and len(self[predicate]) > 0
 
 
 
@@ -704,31 +717,31 @@ class PGBasedPolicy(Agent):
                                      ) -> List[Tuple[int, float]]:
         # Precondition: self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
         
-        # first apply to pg self.normalize(), since should be P(a | s ) = p (a, s)/p(s) but before was computed as P(a | s ) = p (a,s)
-
+        # first be sure to apply to pg self.normalize()
         action_weights = defaultdict(lambda: 0)
         for dest_node in self.pg[predicate]:
             for action in self.pg[predicate][dest_node]:
-                action_weights[action] += self.pg[predicate][dest_node][action]['probability'] 
+                action_weights[action] += self.pg[predicate][dest_node][action]['probability']
         action_weights = [(a, action_weights[a]) for a in action_weights] #p(a, s)/p(s)
         return action_weights
 
+    '''
     def _is_predicate_in_pg_and_usable(self, predicate) -> bool:
         return self.pg.has_node(predicate) and len(self.pg[predicate]) > 0
 
-    #modified
     def _get_nearest_predicate(self,
-                               predicate
+                               predicate, verbose=False
                                ):
         nearest_state_generator = self.pg.discretizer.nearest_state(predicate)
         new_predicate = predicate
         try:
-            while not self._is_predicate_in_pg_and_usable(new_predicate):
+            while not self.pg._is_predicate_in_pg_and_usable(new_predicate):
                 new_predicate = next(nearest_state_generator)
         except StopIteration:
             print("No nearest states available.")
             new_predicate = None
         return new_predicate
+    '''
 
     def _get_action(self,
                     action_weights: List[Tuple[int, float]]
@@ -741,6 +754,7 @@ class PGBasedPolicy(Agent):
             return np.random.choice([a for a, _ in action_weights], p=[w for _, w in action_weights])
         else:
             raise NotImplementedError
+    
     #modified
     def act_upon_discretized_state(self, predicate):
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
@@ -749,7 +763,7 @@ class PGBasedPolicy(Agent):
             if self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM:
                 action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
             elif self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.FIND_SIMILAR_NODES:
-                nearest_predicate = self._get_nearest_predicate(predicate)
+                nearest_predicate = self.pg.get_nearest_predicate(predicate)
                 if nearest_predicate is not None:  # Ensure nearest_predicate is found
                     action_prob_dist = self._get_action_probability_dist(nearest_predicate)
                 else:
@@ -757,7 +771,6 @@ class PGBasedPolicy(Agent):
                     action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
             else:
                 raise NotImplementedError
-        
         return self._get_action(action_prob_dist)
 
     def act(self,

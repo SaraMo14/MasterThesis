@@ -40,14 +40,13 @@ class SelfDrivingAgent(Agent):
         return len(self.newly_discovered_states) / len(self.visited_states)
 
     
-    def update_policy(self, state, action, reward, next_state):
+    #def update_policy(self, state, action, reward, next_state):
         # Here, the agent would update its policy based on the reward received and the transition
         # For our simple agent, there's no policy update logic
-        pass
+        #pass
 
 
 # Example usage:
-# Assuming an environment object exists
 # env = SomeEnvironment()
 # agent = Agent(env)
 
