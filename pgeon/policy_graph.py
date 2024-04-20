@@ -38,6 +38,43 @@ class PolicyGraph(nx.MultiDiGraph):
             return pickle.load(f)
 
     @staticmethod
+    def from_data_frame(states_df, actions_df, environment, discretizer):
+        pg = PolicyGraph(environment, discretizer)
+        node_info = {}
+        for index, row in states_df.iterrows():
+            state_id = int(row['id'])
+            value = row['value']
+            state_prob = float(row['p(s)'])
+            state_freq = int(row['frequency'])
+            is_destination = row['is_destination']
+            
+            node_info[state_id] = {
+                'value': pg.discretizer.str_to_state(value),
+                'probability': state_prob,
+                'frequency': state_freq,
+                'is_destination': is_destination
+            }
+
+            pg.add_node(node_info[state_id]['value'], 
+                    probability=state_prob,
+                    frequency=state_freq,
+                    destination=is_destination)
+        for index, row in actions_df.iterrows():
+            state_from = int(row['from'])
+            state_to = int(row['to'])
+            action = int(row['action'])
+            prob = float(row['p(s)'])
+            freq = int(row['frequency'])
+            is_destination = True if node_info[state_to]['is_destination'] == '1' else False
+            
+            pg.add_edge(node_info[state_from]['value'], node_info[state_to]['value'], key=action,
+                        frequency=freq, probability=prob, action=action, reward=environment.compute_reward(node_info[state_from]['value'], action, node_info[state_to]['value'], is_destination))
+
+        pg._is_fit = True
+        return pg
+
+    
+    @staticmethod
     def from_nodes_and_edges(path_nodes: str,
                              path_edges: str,
                              environment: gym.Env,
@@ -278,12 +315,10 @@ class PolicyGraph(nx.MultiDiGraph):
             if predicate is None:
                 result = {action: 1 / len(self.discretizer.all_actions()) for action in self.discretizer.all_actions()}
                 return sorted(result.items(), key=lambda x: x[1], reverse=True)
-            print(f'PREDICATE BEF {predicate}')
             predicate = self.get_nearest_predicate(predicate)
             if predicate is None:
                 result = {a: 1 / len(self.discretizer.all_actions()) for a in self.discretizer.all_actions()}
                 return list(result.items())
-        print(f'PREDICATE AFTER {predicate}')
         # Out edges with actions [(u, v, a), ...]
         possible_actions = [(u, data['action'], v, data['probability'])
                             for u, v, data in self.out_edges(predicate, data=True)]
@@ -346,7 +381,7 @@ class PolicyGraph(nx.MultiDiGraph):
         """
         if verbose:
             print('*********************************')
-            print('* When do you perform action X?')
+            print(f'* When do you perform action {action}?')
             print('*********************************')
 
         all_nodes, best_nodes = self.get_when_perform_action(action)
@@ -375,15 +410,14 @@ class PolicyGraph(nx.MultiDiGraph):
         """
         Subtracts 2 predicates, getting only the values that are different
 
-        :param origin: Origin predicate
-        :type origin: Union[str, list]
-        :param destination: Destination predicate
+        :param origin: Origin as Tuple[Predicate, Predicate, Predicate]
+        :param destination: Destination as Tuple[Predicate, Predicate, Predicate]
         :return dict: Dict with the different values
         """
         if type(origin) is str:
-            origin = origin.split('-')
+            origin = origin.split(',')
         if type(destination) is str:
-            destination = destination.split('-')
+            destination = destination.split(',')
 
         result = {}
         for value1, value2 in zip(origin, destination):
@@ -400,13 +434,14 @@ class PolicyGraph(nx.MultiDiGraph):
         :param state: State
         :return: List of [Action, destination_state, difference]
         """
-        outs = self.out_edges(state, data=True) #return all edges that start from current state
+
+        outs = self.out_edges(state, data=True)
         outs = [(u, d['action'], v, d['probability']) for u, v, d in outs]
-        
         result = [(self.get_most_probable_option(v, greedy=greedy, verbose=verbose),
                    v,
                    self.substract_predicates(u, v)
                    ) for u, a, v, w in outs]
+        
         result = sorted(result, key=lambda x: x[1])
 
         return result
@@ -426,7 +461,7 @@ class PolicyGraph(nx.MultiDiGraph):
             mode = PGBasedPolicyMode.STOCHASTIC
         pg_policy = PGBasedPolicy(self, mode)
         best_action = pg_policy.act_upon_discretized_state(predicate)
-        result = self.nearby_predicates(predicate)
+        result = self.nearby_predicates(predicate, greedy)
         explanations = []
         if verbose:
             print('I would have chosen:', best_action)
@@ -692,6 +727,12 @@ class PGBasedPolicy(Agent):
         
         
         self.pg = policy_graph
+        #self.visited_states = set()
+        #self.newly_discovered_states = set()
+
+
+
+        
         assert mode in [PGBasedPolicyMode.GREEDY, PGBasedPolicyMode.STOCHASTIC], \
             'mode must be a member of the PGBasedPolicyMode enum!'
         self.mode = mode

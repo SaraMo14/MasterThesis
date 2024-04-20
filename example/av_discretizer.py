@@ -228,8 +228,8 @@ class AVDiscretizer(Discretizer):
             self.unique_states[state_str] = len(self.unique_states)
         return self.unique_states[state_str]
 
-    
-    def get_action_id(self, action):
+    @staticmethod
+    def get_action_id(action):
             return action.value
 
 
@@ -254,8 +254,6 @@ class AVDiscretizer(Discretizer):
     
     def nearest_state(self, state, chunk_size = 4):
         #TODO: put chunk size as varible of the discretizer?
-        #TODO: QUESTION: All the yielded state must exist already?
-
         og_position, og_velocity, og_angle = state
         
         x,y = og_position.value

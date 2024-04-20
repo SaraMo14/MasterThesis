@@ -1,7 +1,7 @@
 from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
 import numpy as np
-from example.nuscenes.av_discretizer import Position, Velocity, Action, Rotation
+from example.av_discretizer import Position, Velocity, Action, Rotation, AVDiscretizer
 from pgeon.discretizer import Predicate
 
 
@@ -10,27 +10,31 @@ class SelfDrivingEnvironment(Environment):
 
     def __init__(self):
 
-        self.initial_state = None
-
-        return None
+        self.current_state = None
+        self.discretizer = AVDiscretizer()
 
     # TODO Set seed, introduce randomness
     def reset(self, seed: Optional[int] = None) -> Any:
-        self.state = (0,0,0,0) # continuous x, y, velocity, yaw
-        return self.state
+        self.current_state = [0,0,0,0]#(Position(0, 0), Velocity.STOPPED, Rotation.FORWARD)
 
 
-    def step(self, action) -> Tuple[Any, Any, bool, Any]:
-        print('step function to be implemented')
+    def step(self, action:Action) -> Tuple[Tuple[Predicate, Predicate, Predicate], float, bool]:
+        # Given the current state and the chosen action, determine the next state and the reward
         reward = 0.1  
-        new_state = ""
-
+        next_state = self.apply_action(action, self.discretizer.discretize(self.current_state))
+        #TODO: should the next state be createed by me or retrieved by the MDP?
+        reward = self.compute_reward(next_state)       
 
         # Check for terminal conditions (e.g., collision, reaching destination)
         done = False
         extra_info = {} 
-        return new_state, reward, done, extra_info
+        return next_state, reward, done, extra_info
     
+
+    def apply_action(self, action:Action):
+
+        pass
+
 
     @staticmethod
     def compute_reward(current_state, action, next_state, is_destination):
@@ -100,7 +104,7 @@ class SelfDrivingEnvironment(Environment):
         
         Args:
         - policy: The policy to follow.
-        - initial_state: The state from which to start.
+        - initial_state: The state from which to start (continuos).
         - v: final state.
         - max_steps: Maximum number of steps to prevent infinite loops.
         
@@ -112,10 +116,10 @@ class SelfDrivingEnvironment(Environment):
         step_count = 0
         reached_final = False
 
-        self.initial_state = initial_state
+        self.current_state = initial_state
 
         while step_count < max_steps:
-            action = agent.act(initial_state)
+            action = agent.act(self.current_state)
             next_state, reward, done, _ = self.step(action)
             total_reward +=reward
             step_count +=1
@@ -127,7 +131,7 @@ class SelfDrivingEnvironment(Environment):
                 # If 'done' is True, but the final state hasn't been reached, the episode ended unexpectedly.
                 break
 
-            initial_state = next_state
+            self.current_state = next_state
 
         return total_reward, reached_final
         

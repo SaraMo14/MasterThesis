@@ -1,6 +1,9 @@
 from collections import defaultdict
 import csv
+import pandas as pd
 import os
+from pgeon.policy_graph import PolicyGraph
+
 class TransitionRecorded:
     def __init__(self):
         self.state_counter = defaultdict(int) # Tracks frequency of each state
@@ -67,3 +70,24 @@ class TransitionRecorded:
             for (state, action, next_state), prob in transition_probabilities.items():
                 writer.writerow([state, next_state, action, prob, self.transition_counter[state][action][next_state]])
 
+
+
+   
+    def create_dataframes(self, states_info):
+        state_probabilities, transition_probabilities = self.calculate_probabilities()
+        
+        states_data = []
+        for state_id, prob in state_probabilities.items():
+            predicate = next((state_str for state_str, id in states_info.items() if id == state_id), "")
+            is_destination = 1 if state_id in self.destination_states else 0
+            states_data.append([state_id, predicate, prob, self.state_counter[state_id], is_destination])
+        
+        states_df = pd.DataFrame(states_data, columns=['id', 'value', 'p(s)', 'frequency', 'is_destination'])
+        
+        actions_data = []
+        for (state, action, next_state), prob in transition_probabilities.items():
+            actions_data.append([state, next_state, action, prob, self.transition_counter[state][action][next_state]])
+        
+        actions_df = pd.DataFrame(actions_data, columns=['from', 'to', 'action', 'p(s)', 'frequency'])
+        
+        return states_df, actions_df
