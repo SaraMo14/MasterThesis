@@ -60,10 +60,14 @@ Description
     Replace `[Output Directory]` with your desired output path for the processed CSV file.
 
 
-## Demo of Generating a Policy Graph
+## Generating a Policy Graph
+Run `extract_pg.py` if you want to generate a Policy Graph of a trained agent. The flag  `--normalize` specifies whether the probabilities in the PG are stored normalized or not. The flag `--input` specifies the input data location.  The flag `--output` indicates the output formate of the PG.
  ```bash
-    python3 demo.ipynb
+    python3 extract_pg.py [--normalize] [--verbose] --input DATAFOLDER --output {csv, pickle, gram}
  ```
+The resulting Policy Graph will be stored in `example/data/policy_graphs`.
+
+## Evaluating a policy
 
 ## Contributing
 
