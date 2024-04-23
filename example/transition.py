@@ -74,6 +74,9 @@ class TransitionRecorded:
 
    
     def create_dataframes(self, states_info):
+        """
+        Function that creates dataframe of states and actions of the agent.
+        """
         state_probabilities, transition_probabilities = self.calculate_probabilities()
         
         states_data = []

@@ -47,28 +47,29 @@ class PolicyGraph(nx.MultiDiGraph):
             state_prob = float(row['p(s)'])
             state_freq = int(row['frequency'])
             is_destination = row['is_destination']
-            
+            #is_destination = True if row['is_destination'] == 1 else False            
             node_info[state_id] = {
                 'value': pg.discretizer.str_to_state(value),
                 'probability': state_prob,
                 'frequency': state_freq,
                 'is_destination': is_destination
             }
-
             pg.add_node(node_info[state_id]['value'], 
                     probability=state_prob,
                     frequency=state_freq,
-                    destination=is_destination)
+                    is_destination=is_destination,
+                    )
+            
         for index, row in actions_df.iterrows():
             state_from = int(row['from'])
             state_to = int(row['to'])
             action = int(row['action'])
             prob = float(row['p(s)'])
             freq = int(row['frequency'])
-            is_destination = True if node_info[state_to]['is_destination'] == '1' else False
+            #is_destination = True if node_info[state_to]['is_destination'] == '1' else False
             
             pg.add_edge(node_info[state_from]['value'], node_info[state_to]['value'], key=action,
-                        frequency=freq, probability=prob, action=action, reward=environment.compute_reward(node_info[state_from]['value'], action, node_info[state_to]['value'], is_destination))
+                        frequency=freq, probability=prob, action=action)#, reward=environment.compute_reward(node_info[state_from]['value'], action, node_info[state_to]['value'], is_destination))
 
         pg._is_fit = True
         return pg
@@ -102,7 +103,7 @@ class PolicyGraph(nx.MultiDiGraph):
                 pg.add_node(node_info[int(state_id)]['value'], 
                             probability=state_prob,
                             frequency=state_freq,
-                            destination=is_destination)
+                            is_destination=is_destination)
 
         with open(f'{path_edges}{"" if path_to_edges_includes_csv else ".csv"}', 'r+') as f:
             csv_r = csv.reader(f)
@@ -118,7 +119,7 @@ class PolicyGraph(nx.MultiDiGraph):
                 freq = int(freq)
                 is_destination = True if node_info[node_to]['is_destination'] == '1' else False
                 pg.add_edge(node_info[node_from]['value'], node_info[node_to]['value'], key=action,
-                            frequency=freq, probability=prob, action=action, reward=environment.compute_reward(node_info[node_from]['value'], action, node_info[node_to]['value'], is_destination))
+                            frequency=freq, probability=prob, action=action)#, reward=environment.compute_reward(node_info[node_from]['value'], action, node_info[node_to]['value'], is_destination))
         pg._is_fit = True
         return pg
 
@@ -460,7 +461,7 @@ class PolicyGraph(nx.MultiDiGraph):
         else:
             mode = PGBasedPolicyMode.STOCHASTIC
         pg_policy = PGBasedPolicy(self, mode)
-        best_action = pg_policy.act_upon_discretized_state(predicate)
+        best_action = pg_policy.act_upon_discretized_state(predicate)[0]
         result = self.nearby_predicates(predicate, greedy)
         explanations = []
         if verbose:
@@ -539,11 +540,11 @@ class PolicyGraph(nx.MultiDiGraph):
         node_ids = {}
         with open(f'{path_nodes}{"" if path_to_nodes_includes_csv else ".csv"}', 'w+') as f:
             csv_w = csv.writer(f)
-            csv_w.writerow(['id', 'value', 'p(s)', 'frequency'])
+            csv_w.writerow(['id', 'value', 'p(s)', 'frequency', 'is_destination'])
             for elem_position, node in enumerate(self.nodes):
                 node_ids[node] = elem_position
                 csv_w.writerow([elem_position, self.discretizer.state_to_str(node),
-                                self.nodes[node]['probability'], self.nodes[node]['frequency']])
+                                self.nodes[node]['probability'], self.nodes[node]['frequency'], self.nodes[node]['is_destination']])
 
         with open(f'{path_edges}{"" if path_to_edges_includes_csv else ".csv"}', 'w+') as f:
             csv_w = csv.writer(f)
@@ -798,26 +799,39 @@ class PGBasedPolicy(Agent):
     
     #modified
     def act_upon_discretized_state(self, predicate):
+        is_destination = False
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
             action_prob_dist = self._get_action_probability_dist(predicate)
+            print(action_prob_dist)
+            is_destination = self.pg.nodes[predicate]['is_destination']
         else:
             if self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM:
                 action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
             elif self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.FIND_SIMILAR_NODES:
                 nearest_predicate = self.pg.get_nearest_predicate(predicate)
-                if nearest_predicate is not None:  # Ensure nearest_predicate is found
+                if nearest_predicate is not None:  
                     action_prob_dist = self._get_action_probability_dist(nearest_predicate)
                 else:
                     # Fallback if no nearest predicate is found
                     action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
             else:
                 raise NotImplementedError
-        return self._get_action(action_prob_dist)
+        return self._get_action(action_prob_dist), is_destination 
 
+    
     def act(self,
             state
             ) -> Any:
+        '''
+        Args:
+            Current state as np.array([x,y,v,yaw]).
+
+        Output:
+            Next action, given the input state.
+            is_destination: 1 if input state is a (intermediate) destination state, 0 otherwise
+        '''
         predicate = self.pg.discretizer.discretize(state)
+        print(predicate)
         return self.act_upon_discretized_state(predicate)
 
 

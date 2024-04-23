@@ -42,7 +42,7 @@ if __name__ == '__main__':
         'delta_local_x': 'float64',
         'delta_local_y': 'float64'
     }
-    df = pd.read_csv(Path(data_folder) / 'dataset_from_ego_mini.csv', dtype=dtype_dict, parse_dates=['timestamp'])
+    df = pd.read_csv(Path(data_folder) / 'dataset_from_ego_full.csv', dtype=dtype_dict, parse_dates=['timestamp'])
     trajectory = env.discretizer.compute_trajectory(df)
     recorder = TransitionRecorded()
     recorder.process_transitions(trajectory)
@@ -53,15 +53,15 @@ if __name__ == '__main__':
     if normalize:
         pg._normalize()
         
-    normalize = "norm" if normalize else ""
+    #normalize = "norm" if normalize else ""
     
     if output_format == 'csv':
-        nodes_path = f'example/dataset/data/policy_graphs/pg_{normalize}_nodes.{output_format}'
-        edges_path = f'example/dataset/data/policy_graphs/pg_{normalize}_edges.{output_format}'
-        traj_path = f'example/dataset/data/policy_graphs/pg_{normalize}_traj.{output_format}'
+        nodes_path = f'example/dataset/data/policy_graphs/pg_nodes.{output_format}'
+        edges_path = f'example/dataset/data/policy_graphs/pg_edges.{output_format}'
+        traj_path = f'example/dataset/data/policy_graphs/pg_traj.{output_format}'
         pg.save(output_format, [nodes_path, edges_path, traj_path])
     else:
-        pg.save(output_format, f'example/dataset/data/policy_graphs/pg_{normalize}.{output_format}')
+        pg.save(output_format, f'example/dataset/data/policy_graphs/pg.{output_format}')
 
 
     if verbose:

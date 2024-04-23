@@ -54,10 +54,10 @@ class Action(Enum):
   STRAIGHT = auto() #car keep going straight at same pace
   GAS_TURN_RIGHT= auto()
   GAS_TURN_LEFT= auto()
-  GAS_STRAIGHT = auto()
+  #GAS_STRAIGHT = auto()
   BRAKE_TURN_RIGHT = auto()  
   BRAKE_TURN_LEFT = auto()
-  BRAKE_STRAIGHT = auto()
+  #BRAKE_STRAIGHT = auto()
   #TODO:differentiate between sharp and slight accelaraion, slight turn, ..., lane keeping, preparing to lane change, and lane changing (more of intentations)
 
 
@@ -76,6 +76,7 @@ class AVDiscretizer(Discretizer):
         self.eps_pos_y = 0.2
         #self.eps_heading_change = 0.02
         
+        self.frequency = 0.5 #2Hz
     @staticmethod
     def is_close(a, b, eps=0.1):
         return abs(a - b) <= eps
@@ -209,13 +210,13 @@ class AVDiscretizer(Discretizer):
         elif acc_action == Action.GAS and dir_action == Action.TURN_LEFT:
             return Action.GAS_TURN_LEFT
         elif acc_action == Action.GAS and dir_action == Action.STRAIGHT:
-            return Action.GAS_STRAIGHT
+            return Action.GAS#_STRAIGHT
         elif acc_action == Action.BRAKE and dir_action == Action.TURN_RIGHT:
             return Action.BRAKE_TURN_RIGHT
         elif acc_action == Action.BRAKE and dir_action == Action.TURN_LEFT:
             return Action.BRAKE_TURN_LEFT
         elif acc_action == Action.BRAKE and dir_action == Action.STRAIGHT:
-            return Action.BRAKE_STRAIGHT
+            return Action.BRAKE#_STRAIGHT
         elif acc_action is None:
             # fallback to direction if no acceleration action was determined
             return dir_action
@@ -231,6 +232,13 @@ class AVDiscretizer(Discretizer):
     @staticmethod
     def get_action_id(action):
             return action.value
+    
+    @staticmethod
+    def get_action_from_id(action_id):
+        for action in Action:
+            if action.value == action_id:
+                return action
+        raise ValueError("Invalid action ID")
 
 
     def state_to_str(self,

@@ -6,38 +6,104 @@ from pgeon.discretizer import Predicate
 
 
 class SelfDrivingEnvironment(Environment):
-    environment_name = "NuScenes Environemnt"
+    environment_name = "nuScenes Environemnt"
 
     def __init__(self):
 
         self.current_state = None
         self.discretizer = AVDiscretizer()
+        self.WEIGHT_SPEED = 1
+        self.WEIGHT_SAFETY = 2
+        self.WEIGHT_SMOOTHNESS = 1
+        self.WEIGHT_PROGRESS = 1
 
     # TODO Set seed, introduce randomness
     def reset(self, seed: Optional[int] = None) -> Any:
-        self.current_state = [0,0,0,0]#(Position(0, 0), Velocity.STOPPED, Rotation.FORWARD)
+        self.current_state = np.array([0,0,0,0])
 
 
-    def step(self, action:Action) -> Tuple[Tuple[Predicate, Predicate, Predicate], float, bool]:
-        # Given the current state and the chosen action, determine the next state and the reward
-        reward = 0.1  
-        next_state = self.apply_action(action, self.discretizer.discretize(self.current_state))
-        #TODO: should the next state be createed by me or retrieved by the MDP?
-        reward = self.compute_reward(next_state)       
+    def step(self, action:Action, is_destination) -> Tuple[Tuple[Predicate, Predicate, Predicate], float, bool]:
+        """
+        Perform a step in the environment.
 
-        # Check for terminal conditions (e.g., collision, reaching destination)
-        done = False
-        extra_info = {} 
-        return next_state, reward, done, extra_info
+        Args:
+            action (Action): Action to be taken.
+            is_destination: True is current state is a (intermediate) destination state, False otherwise
+
+        Returns:
+            np.ndarray: Next state after taking the action.
+        """
+        disc_current_state = self.discretizer.discretize(self.current_state)
+        next_state = self.apply_action(action)
+        #disc_next_state = self.discretizer.discretize(next_state)
+
+        reward = self.compute_reward(action,is_destination )       
+
+        return next_state, reward, False, None
     
+    
+    def apply_action(self, action: Action):
+        """
+        Function that given current state and action returns the next continuous state
+        """
+        x, y, v, yaw = self.current_state
+        delta_v = self.discretizer.frequency * (self.discretizer.eps_vel + 0.1)
+        delta_y = self.discretizer.frequency * v
+        delta_x = self.discretizer.eps_pos_x + 0.1
 
-    def apply_action(self, action:Action):
+        if action == Action.REVERSE:
+            next_state = np.array([x, y - delta_y,v, yaw])
+        elif action == Action.STRAIGHT:
+            next_state = np.array([x, y + delta_y, v, yaw])
+        elif action == Action.BRAKE:
+            next_state = np.array([x, y + delta_y, v - delta_v, yaw])
+        elif action == Action.GAS:
+            next_state = np.array([x, y + delta_y, v + delta_v, yaw])
+        elif action == Action.TURN_RIGHT:
+            next_state = np.array([x + delta_x, y, v, yaw+self.eps_rot])
+        elif action == Action.TURN_LEFT:
+            next_state = np.array([x - delta_x, y, v, yaw-self.eps_rot])
+        elif action == Action.GAS_TURN_LEFT:
+            next_state = np.array([x - delta_x, y + delta_y, v + delta_v, yaw-self.eps_rot])
+        elif action == Action.GAS_TURN_RIGHT:
+            next_state = np.array([x + delta_x, y + delta_y, v + delta_v, yaw+self.eps_rot])
+        elif action == Action.BRAKE_TURN_LEFT:
+            next_state = np.array([x - delta_x, y + delta_y, v - delta_v, yaw-self.eps_rot])
+        elif action == Action.BRAKE_TURN_RIGHT:
+            next_state = np.array([x + delta_x, y + delta_y, v - delta_v, yaw+self.eps_rot])
+        else:
+            # for IDLE action or any undefined action, return current state
+            next_state = self.current_state
 
-        pass
+        return np.array(next_state)
+
+    def compute_reward(self, action, is_destination):
+        #ref: https://arxiv.org/pdf/1904.09503.pdf
+        """
+        Computes the reward for transitioning from the current_state to next_state via action.
+
+        Args:
+            current_state: discretized current velocity, position and rotation action,
+            action:
+            next_state: discretized next velocity, position and rotation action
+            is_destination: True is next_state is a final state, False otherwise.
+
+        Return:
+            float: final reward
+        """
+        x,y,v,yaw = self.current_state
+
+        speed_reward = min(v, 10-v)
+        smoothness_reward = -0.5*(yaw**2)
+        #TODO: penalize collision, line change
+        #safety_reward = 0
+        progress_reward = +0.1 if is_destination else -0.1
+        return speed_reward + smoothness_reward + progress_reward
 
 
+    '''  
     @staticmethod
-    def compute_reward(current_state, action, next_state, is_destination):
+    def compute_reward_disc(self, current_state, action, is_destination):
         """
         Computes the reward for transitioning from the current_state to next_state via action.
 
@@ -51,61 +117,72 @@ class SelfDrivingEnvironment(Environment):
             float: final reward
         """
 
-        reward = 0
+        # Initialize reward components
+        speed_reward = 0
+        safety_reward = 0
+        smoothness_reward = 0
+        progress_reward = 0
 
-        velocity_predicate = current_state[1].value[0]
-        velocity = Velocity[str(velocity_predicate)[:-1].split('(')[1]]
+        vel_predicate = current_state[1].value[0]
+        velocity = Velocity[str(vel_predicate)[:-1].split('(')[1]]
+        yaw_predicate = current_state[2].value[0]
+        yaw = Velocity[str(yaw_predicate)[:-1].split('(')[1]]
         
-        next_velocity_predicate = next_state[1].value[0]
-        next_velocity = Velocity[str(next_velocity_predicate)[:-1].split('(')[1]]
-       
-
         # Encourage maintaining a safe and moderate speed
-        if velocity == Velocity.MEDIUM:
-            reward += 1
-        elif velocity in [Velocity.LOW, Velocity.HIGH]:
-            reward += 0.5
-        elif velocity == Velocity.VERY_HIGH:
-            reward -= 1  # Penalize very high speeds for safety reasons
+        if velocity in [Velocity.LOW, Velocity.MEDIUM]:
+            speed_reward += 0.1
+        elif velocity == [Velocity.HIGH, Velocity.VERY_HIGH]:
+            speed_reward -= 0.5 # Penalize very high speeds for safety reasons
 
         # Penalize stopping in potentially unsafe or unnecessary situations
         if velocity == Velocity.STOPPED:
-            reward -= 0.5
+            safety_reward -= 0.5
 
         # Encourage smooth driving: penalize sudden actions that might indicate aggressive driving
         if action in [Action.GAS, Action.BRAKE]:
-            reward -= 0.2
+            smoothness_reward -= 0.2
 
         # Encourage staying straight unless necessary to turn
-        if action in [Action.TURN_LEFT, Action.TURN_RIGHT]:
-            reward -= 0.1
+        if action in [Action.TURN_LEFT, Action.TURN_RIGHT, Action.GAS_TURN_LEFT, Action.GAS_TURN_RIGHT]:
+            smoothness_reward -= 0.1
         elif action == Action.STRAIGHT:
-            reward += 0.2
+            smoothness_reward += 0.2
 
-        # If considering the next state, encourage actions leading to safer states
-        if next_state:
-            if next_velocity in [Velocity.MEDIUM, Velocity.LOW]:
-                reward += 0.5
-            if next_velocity == Velocity.STOPPED:
-                reward -= 0.5  # Assuming stopping might not always be ideal
+        if yaw in [Rotation.LEFT, Rotation.RIGHT]:
+            smoothness_reward -=0.5
+        elif yaw in [Rotation.SLIGHT_LEFT, Rotation.SLIGHT_RIGHT]:
+            smoothness_reward -=0.2
+        else:
+            smoothness_reward +=0.1
 
-        # Encourage actions that lead to progress towards a goal
+        # Encourage actions that lead to progress towards a goal.
+        # Give positive reward if current state is a intermediate destination
         if is_destination:
-            reward += 10
+            progress_reward += 10
 
-        return reward
+        
+        total_reward = (
+            speed_reward * self.WEIGHT_SPEED
+            + safety_reward * self.WEIGHT_SAFETY
+            + smoothness_reward * self.WEIGHT_SMOOTHNESS
+            + progress_reward * self.WEIGHT_PROGRESS
+        )
 
+        return total_reward#, speed_reward, safety_reward, smoothness_reward, progress_reward
+        
+    '''
 
 
     #@staticmethod
-    def compute_total_reward(self, agent, initial_state, final_state, max_steps=100):
+    #TODO:  update
+    def compute_total_reward(self, agent, initial_state, final_state, max_steps=200):
         """
         Computes the total reward obtained by following a policy from an initial state to a final state.
         
         Args:
-        - policy: The policy to follow.
+        - agent: The agent following the policy.
         - initial_state: The state from which to start (continuos).
-        - v: final state.
+        - final_state: The final state to reach.
         - max_steps: Maximum number of steps to prevent infinite loops.
         
         Returns:
@@ -119,19 +196,17 @@ class SelfDrivingEnvironment(Environment):
         self.current_state = initial_state
 
         while step_count < max_steps:
-            action = agent.act(self.current_state)
-            next_state, reward, done, _ = self.step(action)
+            action_id, is_destination = agent.act(self.current_state)
+            action = self.discretizer.get_action_from_id(action_id)
+            print(action) 
+            next_state, reward, _, _ = self.step(action, is_destination)
             total_reward +=reward
             step_count +=1
 
-            if (next_state == final_state).all(): #TODO: review
+            self.current_state = next_state
+            if np.array_equal(next_state,final_state):
                 reached_final = True
                 break
-            elif done:
-                # If 'done' is True, but the final state hasn't been reached, the episode ended unexpectedly.
-                break
-
-            self.current_state = next_state
 
         return total_reward, reached_final
         
