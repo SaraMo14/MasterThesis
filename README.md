@@ -1,15 +1,15 @@
 # Applying Policy Graphs to NuScenes
 
 Description
-## Folder Structure
-    - `example/`: Folder containing the source code of the project.
+# Folder Structure
+    - 'example/': Folder containing the source code of the project.
         - `dataset/`: Folder containing the script `generate_dataset_from_ego.py` to generate the dataset of                       trajectories from nuScenes raw data.
             - `data/`: Folder containing the generated Policy Graphs and the nuScenes dataset.
     - `pgeon/`: Folder containing the tailored version of the **_pgeon_** Python package, that produces                        explainations for opaque agents using Policy Graphs..
     - `generate_pg.py`: Script that generates a Policy Graph from an agent.
     - `test_pg.py`: Script that tests the performance of the Policy Graph.
-    -  
-## Installation
+    - 
+# Installation
 
 1. **Clone This Repository**
 
