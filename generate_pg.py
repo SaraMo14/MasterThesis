@@ -67,4 +67,4 @@ if __name__ == '__main__':
     if verbose:
         print(f'Successfully generated Policy Graph with {len(pg.nodes)} nodes and {len(pg.edges)} edges.')
 
-    #python3 extract_pg.py --input /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --normalize --verbose
+    #python3 generate_pg.py --input /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --normalize --verbose
