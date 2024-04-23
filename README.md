@@ -11,6 +11,7 @@ This project applies Policy Graphs to nuScenes data to explain the behavior of a
 - `pgeon/`: This folder contains a tailored version of the **_pgeon_** Python package, which provides explanations for opaque agents using Policy Graphs.
 - `generate_pg.py`: Script for generating a Policy Graph from an agent.
 - `test_pg.py`: Script for testing the performance of the Policy Graph.
+- `data_analysis.ipynb`: Jupyter notebook for data analysis of the nuScenes dataset.
 
 ## Installation
 
