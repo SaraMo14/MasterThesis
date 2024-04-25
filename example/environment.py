@@ -19,37 +19,38 @@ class SelfDrivingEnvironment(Environment):
 
     # TODO Set seed, introduce randomness
     def reset(self, seed: Optional[int] = None) -> Any:
-        self.current_state = np.array([0,0,0,0])
+        self.current_state = np.array([0,0,0,0]) #Predicate()
 
 
     def step(self, action:Action, is_destination) -> Tuple[Tuple[Predicate, Predicate, Predicate], float, bool]:
         """
-        Perform a step in the environment.
+        Perform a step in the environment based on the computation of P(s'|s,a) as #(s,a,s')/(s,a).
 
         Args:
             action (Action): Action to be taken.
             is_destination: True is current state is a (intermediate) destination state, False otherwise
 
         Returns:
-            np.ndarray: Next state after taking the action.
+            next_state: tuple of predicates representing the next state after taking the action.
+            reward: 
         """
-        disc_current_state = self.discretizer.discretize(self.current_state)
+         
         next_state = self.apply_action(action)
-        #disc_next_state = self.discretizer.discretize(next_state)
-
         reward = self.compute_reward(action,is_destination )       
 
         return next_state, reward, False, None
     
     
+    '''
     def apply_action(self, action: Action):
         """
         Function that given current state and action returns the next continuous state
         """
         x, y, v, yaw = self.current_state
-        delta_v = self.discretizer.frequency * (self.discretizer.eps_vel + 0.1)
-        delta_y = self.discretizer.frequency * v
-        delta_x = self.discretizer.eps_pos_x + 0.1
+        delta_v = self.discretizer.frequency * (self.discretizer.eps_vel*2)
+        delta_y = v * np.sin(yaw) * self.discretizer.frequency  
+        delta_x = v * np.cos(yaw) * self.discretizer.frequency 
+
 
         if action == Action.REVERSE:
             next_state = np.array([x, y - delta_y,v, yaw])
@@ -60,50 +61,27 @@ class SelfDrivingEnvironment(Environment):
         elif action == Action.GAS:
             next_state = np.array([x, y + delta_y, v + delta_v, yaw])
         elif action == Action.TURN_RIGHT:
-            next_state = np.array([x + delta_x, y, v, yaw+self.eps_rot])
+            next_state = np.array([x + delta_x, y, v, yaw+self.discretizer.eps_rot*2])
         elif action == Action.TURN_LEFT:
-            next_state = np.array([x - delta_x, y, v, yaw-self.eps_rot])
+            next_state = np.array([x - delta_x, y, v, yaw-self.discretizer.eps_rot*2])
         elif action == Action.GAS_TURN_LEFT:
-            next_state = np.array([x - delta_x, y + delta_y, v + delta_v, yaw-self.eps_rot])
+            next_state = np.array([x - delta_x, y + delta_y, v + delta_v, yaw-self.discretizer.eps_rot*2])
         elif action == Action.GAS_TURN_RIGHT:
-            next_state = np.array([x + delta_x, y + delta_y, v + delta_v, yaw+self.eps_rot])
+            next_state = np.array([x + delta_x, y + delta_y, v + delta_v, yaw+self.discretizer.eps_rot*2])
         elif action == Action.BRAKE_TURN_LEFT:
-            next_state = np.array([x - delta_x, y + delta_y, v - delta_v, yaw-self.eps_rot])
+            next_state = np.array([x - delta_x, y + delta_y, v - delta_v, yaw-self.discretizer.eps_rot*2])
         elif action == Action.BRAKE_TURN_RIGHT:
-            next_state = np.array([x + delta_x, y + delta_y, v - delta_v, yaw+self.eps_rot])
+            next_state = np.array([x + delta_x, y + delta_y, v - delta_v, yaw+self.discretizer.eps_rot*2])
         else:
             # for IDLE action or any undefined action, return current state
             next_state = self.current_state
+            #TODO: fix since when it arrives at idle, the state remains unchanged
+            #you should add a very small epsilon maybe, just to change a bit the state so it doesnt get stuck.
 
         return np.array(next_state)
-
-    def compute_reward(self, action, is_destination):
-        #ref: https://arxiv.org/pdf/1904.09503.pdf
-        """
-        Computes the reward for transitioning from the current_state to next_state via action.
-
-        Args:
-            current_state: discretized current velocity, position and rotation action,
-            action:
-            next_state: discretized next velocity, position and rotation action
-            is_destination: True is next_state is a final state, False otherwise.
-
-        Return:
-            float: final reward
-        """
-        x,y,v,yaw = self.current_state
-
-        speed_reward = min(v, 10-v)
-        smoothness_reward = -0.5*(yaw**2)
-        #TODO: penalize collision, line change
-        #safety_reward = 0
-        progress_reward = +0.1 if is_destination else -0.1
-        return speed_reward + smoothness_reward + progress_reward
-
-
-    '''  
-    @staticmethod
-    def compute_reward_disc(self, current_state, action, is_destination):
+    '''
+      
+    def compute_reward_disc(self, action, is_destination):
         """
         Computes the reward for transitioning from the current_state to next_state via action.
 
@@ -123,9 +101,9 @@ class SelfDrivingEnvironment(Environment):
         smoothness_reward = 0
         progress_reward = 0
 
-        vel_predicate = current_state[1].value[0]
+        vel_predicate = self.current_state[1].value[0]
         velocity = Velocity[str(vel_predicate)[:-1].split('(')[1]]
-        yaw_predicate = current_state[2].value[0]
+        yaw_predicate = self.current_state[2].value[0]
         yaw = Velocity[str(yaw_predicate)[:-1].split('(')[1]]
         
         # Encourage maintaining a safe and moderate speed
@@ -170,12 +148,11 @@ class SelfDrivingEnvironment(Environment):
 
         return total_reward#, speed_reward, safety_reward, smoothness_reward, progress_reward
         
-    '''
 
 
     #@staticmethod
     #TODO:  update
-    def compute_total_reward(self, agent, initial_state, final_state, max_steps=200):
+    def compute_total_reward(self, agent, initial_state, final_state, max_steps=600):
         """
         Computes the total reward obtained by following a policy from an initial state to a final state.
         
@@ -203,6 +180,7 @@ class SelfDrivingEnvironment(Environment):
             total_reward +=reward
             step_count +=1
 
+            print(step_count)
             self.current_state = next_state
             if np.array_equal(next_state,final_state):
                 reached_final = True

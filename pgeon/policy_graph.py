@@ -448,6 +448,8 @@ class PolicyGraph(nx.MultiDiGraph):
         return result
 
     def question3(self, predicate, action, greedy=False, verbose=False):
+        #TODO: can be improved following the paper below (reward decomposition)
+        #ref: https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9659472
         """
         Answers the question: Why do you perform action X in state Y?
         """
@@ -802,7 +804,7 @@ class PGBasedPolicy(Agent):
         is_destination = False
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
             action_prob_dist = self._get_action_probability_dist(predicate)
-            print(action_prob_dist)
+            #print(action_prob_dist)
             is_destination = self.pg.nodes[predicate]['is_destination']
         else:
             if self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM:
@@ -818,24 +820,35 @@ class PGBasedPolicy(Agent):
                 raise NotImplementedError
         return self._get_action(action_prob_dist), is_destination 
 
-    
+    #modified
     def act(self,
             state
             ) -> Any:
         '''
         Args:
-            Current state as np.array([x,y,v,yaw]).
+            Current discretized state.
 
         Output:
             Next action, given the input state.
             is_destination: 1 if input state is a (intermediate) destination state, 0 otherwise
         '''
-        predicate = self.pg.discretizer.discretize(state)
-        print(predicate)
-        return self.act_upon_discretized_state(predicate)
+        #predicate = self.pg.discretizer.discretize(state)
+        print(state)
+        return self.act_upon_discretized_state(state)
 
 
    
 
 
-    
+    def get_next_state(self, current_state, action):
+
+        #compute P(s'|s,a)       
+        frequency_s_a = sum(self.pg.get_edge_data(current_state, next_state, action)['frequency'] for next_state in self.pg[current_state])
+        frequency_s_a_s = defaultdict(lambda: 0)
+
+        for next_state in self.pg[current_state]:
+            frequency_s_a_s[next_state] = self.pg[current_state][next_state][action]['frequency']
+            next_state_probs = [(s/frequency_s_a, frequency_s_a_s[s]) for s in frequency_s_a_s]
+        
+        #how to select next state based on the probability distribution?
+        pass
