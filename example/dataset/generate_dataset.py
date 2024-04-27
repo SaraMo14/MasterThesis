@@ -1,145 +1,138 @@
 import pandas as pd
 from nuscenes import NuScenes
-from nuscenes.prediction import convert_global_coords_to_local
+from nuscenes.utils.geometry_utils import BoxVisibility
 import argparse
 import numpy as np
 from pathlib import Path
 import utils
 
+class NuScenesProcessor:
+    def __init__(self, dataroot, version, dataoutput, key_frames=True, sensor="lidar", complexity=0):
+        self.dataroot = dataroot
+        self.version = version
+        self.dataoutput = dataoutput
+        self.key_frames = key_frames
+        self.sensor = sensor
+        self.complexity = complexity
+        self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
 
-def convert_coordinates(group: pd.DataFrame) -> pd.DataFrame:
-    """
-    Converts the global coordinates of an object in each row to local displacement  relative to its previous position and orientation.
+        if complexity == 1:
+            self.cameras = ['CAM_FRONT', 'CAM_BACK']
+        elif complexity == 2:
+            self.cameras = ['CAM_FRONT', 'CAM_BACK', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT']
+        elif complexity == 3:
+            self.cameras = ['CAM_FRONT', 'CAM_BACK', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT', 'CAM_BACK_RIGHT','CAM_BACK_LEFT' ]
+    
+    def cam_detection(self, samples: pd.DataFrame):
+        """
+        Given a sample in a scene, returns the objects in front of the vehicle, the action they are performing,
+        and the visibility (0=min, 4=100%) from the ego-vehicle.
 
-    This function iterates through a DataFrame where each row represents an object's state at a given time, including its position (x, y) and orientation (rotation).
-    It computes the local displacement (delta_local_x, delta_local_y) at each timestep, using the position and orientation from the previous timestep as the reference frame.
+        NB:
+        A sample of a scene (frame) has several sample annotations (Bounding Boxes). Each sample annotation
+        has 0, 1, or + attributes (e.g., pedestrian moving, etc).
+        The instance of an annotation is described in the instance table, which tracks the number of annotations
+        in which the object appears.
 
-    Args:
-        group (DataFrame): A DataFrame containing the columns 'x', 'y' (global position coordinates), and 'rotation' (object's orientation as a quaternion).
+        For each sample, check if there are any annotations. Retrieve the list of annotations for the sample.
+        For each annotation, check from which camera it is from.
 
-    Returns:
-        DataFrame: The input DataFrame with two new columns added ('delta_local_x' and 'delta_local_y') that represent the local displacement relative to the
-                   previous position and orientation.
+        """
+        for sample_token in samples['sample_token']:
+            sample = self.nuscenes.get('sample', sample_token)
+            #detect_in_front = {cam_type: [] for cam_type in self.cameras}
+            detected_objects = {cam_type: {} for cam_type in self.cameras}
 
-    Note:
-        The first row of the output DataFrame will have 'delta_local_x' and 'delta_local_y'
-        set to 0.0, as there is no previous state to compare.
-    """
+            if len(sample['anns']) > 0:  # Check if sample has annotated objects
+                for ann_token in sample['anns']:
+                    for cam_type in self.cameras:
+                        _, boxes, _ = self.nuscenes.get_sample_data(sample['data'][cam_type], box_vis_level=BoxVisibility.ANY,
+                                                                    selected_anntokens=[ann_token])#, use_flat_vehicle_coordinates=True)
+                        if len(boxes) > 0:
+                            ann_info = self.nuscenes.get('sample_annotation', ann_token)
+                            if len(ann_info['attribute_tokens']) > 0:
+                                for attribute in ann_info['attribute_tokens']:
+                                    attribute_name = self.nuscenes.get('attribute', attribute)['name']
+                                    category = ann_info['category_name']
+                                    visibility = int(self.nuscenes.get('visibility', ann_info['visibility_token'])['token'])
+                                    if visibility >= 3:
+                                        key = (category, attribute_name, visibility)
+                                        if key not in detected_objects[cam_type]:
+                                            detected_objects[cam_type][key] = 0
+                                        detected_objects[cam_type][key] += 1 
+                                        #detect_in_front[cam_type].append({
+                                    #    'category': category,
+                                    #    'attribute': attribute_name,
+                                    #    'visibility': visibility
+                                    #    #velocity: self.nuscenes.box_velocity(ann_token, max_time_diff: float = 1.5)
+                                    #})
 
-    #traslation = (group.iloc[0]['x'], group.iloc[0]['y'], 0) # Using the first row as the origin
-    #rotation = group.iloc[0]['rotation']
-    #coordinates = group[['x','y']].values
-    #local_coords = convert_global_coords_to_local(coordinates, traslation, rotation)
+            for cam_type in self.cameras:
+                samples.loc[samples['sample_token'] == sample_token, f'detect_{cam_type}'] = str(detected_objects[cam_type])
 
-    #group['local_x'], group['local_y'] = local_coords[:, 0], local_coords[:, 1]
+        return samples
 
-    # Initialize the displacement columns for the first row
-    group['delta_local_x'], group['delta_local_y'] = 0.0, 0.0
 
-    for i in range(1, len(group)):
-        # Use the previous row's position as the origin for translation
-        translation = (group.iloc[i-1]['x'], group.iloc[i-1]['y'], 0)
+
+    def process_scene_data(self) -> pd.DataFrame:
+        """
+        Processes agent data from the nuScenes dataset, creating a DataFrame with additional columns for velocity,
+        acceleration, and heading change rate, based on sensor data filtering.
+
+        Args:
+            dataset (NuScenes): Instance of the NuScenes dataset.
+            key_frame (bool): Flag indicating whether to filter for key frames only.
+            sensor (str): Specific sensor modality to filter for.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing processed scene data with dynamics calculations.
+        """
+
+        sample = pd.DataFrame(self.nuscenes.sample)[['token', 'scene_token']].rename(columns={'token': 'sample_token'})
         
-        # Use the previous row's rotation; assuming constant rotation for simplicity
-        rotation = group.iloc[i-1]['rotation']
+        # add front camera objects information
+        if self.complexity > 0:
+            sample = self.cam_detection(sample)
+        #complexity == 0 --> dataset without any knowledge of surrounding objects.
+
         
-        # Current row's global coordinates
-        coordinates = group.iloc[i][['x', 'y']].values.reshape(1, -1)
+        sample_data = pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']]
+        ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
+        ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
         
-        # Convert global coordinates to local based on the previous row's state
-        local_coords = convert_global_coords_to_local(coordinates, translation, rotation)
-        
-        # Update the DataFrame with the computed local displacements
-        group.at[group.index[i], 'delta_local_x'], group.at[group.index[i], 'delta_local_y'] = local_coords[0, 0], local_coords[0, 1]
-    
-    return group
+        merged_df = sample.merge(sample_data, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
 
-
-def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates velocity, acceleration, and heading change rate for each entry in a DataFrame,
-    assuming the DataFrame is sorted by timestamp. The function adds three new columns to the
-    DataFrame: 'velocity', 'acceleration', and 'heading_change_rate'.
-
-    Args:
-        group (DataFrame): A pandas DataFrame containing at least 'timestamp', 'x', 'y', and 'yaw'
-                           columns. 'timestamp' should be in datetime format, and the DataFrame should
-                           be sorted based on 'timestamp'.
-    
-    Returns:
-        DataFrame: The input DataFrame with three new columns added: 'velocity', 'acceleration', and
-                   'heading_change_rate', representing the calculated dynamics.
-                   
-    Note:
-        This function handles cases where consecutive timestamps might be identical (time_diffs == 0)
-        by avoiding division by zero and setting the respective dynamics values to NaN.
-    """
-    time_diffs = group['timestamp'].diff().dt.total_seconds()
-    
-    # Handle potential division by zero for velocity and acceleration calculations
-    valid_time_diffs = time_diffs.replace(0, np.nan)
-    
-    # Calculate displacement (Euclidean distance between consecutive points)
-    displacements = group[['x', 'y']].diff().pow(2).sum(axis=1).pow(0.5)
-    
-    # Meters / second.
-    group['velocity'] = displacements / valid_time_diffs
-    
-    # Meters / second^2.
-    group['acceleration'] = group['velocity'].diff() / valid_time_diffs
-    
-    # Radians / second.
-    group['heading_change_rate'] = group['yaw'].diff() / valid_time_diffs
-
-    return group
-
-
-def process_scene_data(dataset: NuScenes, key_frame: bool, sensor: str) -> pd.DataFrame:
-    """
-    Processes agent data from the nuScenes dataset, creating a DataFrame with additional columns for velocity,
-    acceleration, and heading change rate, based on sensor data filtering.
-
-    Args:
-        dataset (NuScenes): Instance of the NuScenes dataset.
-        key_frame (bool): Flag indicating whether to filter for key frames only.
-        sensor (str): Specific sensor modality to filter for. Use 'all' to include all sensors.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing processed scene data with dynamics calculations.
-    """
-
-    sample = pd.DataFrame(dataset.sample)[['token', 'scene_token']].rename(columns={'token': 'sample_token'})
-    sample_data = pd.DataFrame(dataset.sample_data).query(f"is_key_frame == {key_frame}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']]
-    ego_pose = pd.DataFrame(dataset.ego_pose).rename(columns={'token': 'ego_pose_token'})
-    ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
-    
-    merged_df = sample.merge(sample_data, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
-
-    if sensor != 'all':
-        calibrated_sensors = pd.DataFrame(dataset.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
-        sensors = pd.DataFrame(dataset.sensor).rename(columns={'token': 'sensor_token'})
-        sensors = sensors[sensors['modality'] == sensor].merge(calibrated_sensors, on='sensor_token').drop(columns=['rotation','translation', 'channel','camera_intrinsic', 'sensor_token'])
+        calibrated_sensors = pd.DataFrame(self.nuscenes.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
+        sensors = pd.DataFrame(self.nuscenes.sensor).rename(columns={'token': 'sensor_token'})
+        sensors = sensors[sensors['modality'] == self.sensor].merge(calibrated_sensors, on='sensor_token').drop(columns=['rotation','translation', 'channel','camera_intrinsic', 'sensor_token'])
         merged_df = sensors.merge(merged_df, on='calibrated_sensor_token' ).drop(columns=['calibrated_sensor_token'])
+            
+        merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp'], unit='us')
+
+        merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw)
+
+        merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
         
-    merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp'], unit='us')
+        # Group by 'scene_token' and calculate dynamics
+        final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics).dropna()
 
-    merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw)
+        # Compute  for each scene, the movement of the agent in local x and y
+        df_updated = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
 
-    merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
-    
-    # Group by 'scene_token' and calculate dynamics
-    final_df = merged_df.groupby('scene_token', as_index=False).apply(calculate_dynamics).dropna()
+        # mark destination state
+        df_updated['is_destination'] = False
+        for scene_token in df_updated['scene_token'].unique():
+            last_index = df_updated[df_updated['scene_token'] == scene_token].index[-1]
+            df_updated.at[last_index, 'is_destination'] = True
 
-    # Compute  for each scene, the movement of the agent in local x and y
-    df_updated = pd.concat([convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
+        return df_updated
 
-    # mark destination state
-    #df_updated['is_destination'] = False
-    #for scene_token in df_updated['scene_token'].unique():
-    #    last_index = df_updated[df_updated['scene_token'] == scene_token].index[-1]
-    #    df_updated.at[last_index, 'is_destination'] = True
 
-    return df_updated
+    def run_processing(self):
+        states = self.process_scene_data()
+        output_csv_path = Path(self.dataoutput) / f'dataset_{self.version}_{self.sensor}_{self.complexity}.csv'
+        states.to_csv(output_csv_path, index=False)
+        print(f"Processed data saved to {output_csv_path}")
 
 
 if __name__ == "__main__":
@@ -150,22 +143,23 @@ if __name__ == "__main__":
     parser.add_argument('--dataoutput', required=True, type=str, help='Path for the output CSV file directory.')
     parser.add_argument('--version', required=True, type=str, help='Version of the nuScenes dataset to process.') #v1.0-mini, v1.0-trainval, etc. 
     parser.add_argument('--key_frames', required=False, type=lambda x: (str(x).lower() == 'true'), default=True, help='Flag to process key frames only (True/False).')
-    parser.add_argument('--sensor', required=False, type=str, default="lidar", choices=["all", "lidar", "camera", "radar"], help='Specific sensor modality to filter for. Options: "all", "lidar", "camera", "radar".')
-
+    parser.add_argument('--sensor', required=False, type=str, default="lidar", choices=["lidar", "radar"], help='Specific sensor modality to filter for. Options: "lidar", "radar".')
+    parser.add_argument('--complexity', required=True, type=int, default=0, choices=[0,1,2,3], help='Level of complexity of the dataset.')
 
 
     args = parser.parse_args()
 
-    DATAROOT = Path(args.dataroot) #'/data/sets/nuscenes'
+    #DATAROOT = Path(args.dataroot) #'/data/sets/nuscenes'
 
-    nuscenes = NuScenes(args.version, dataroot=DATAROOT, verbose=True)
+    #nuscenes = NuScenes(args.version, dataroot=DATAROOT, verbose=True)
 
-    states = process_scene_data(nuscenes, args.key_frames, args.sensor)
+    processor = NuScenesProcessor( args.dataroot, args.version, args.dataoutput, args.key_frames, args.sensor, args.complexity)
+    processor.run_processing()
 
-    DATAOUTPUT = Path(args.dataoutput)
-    output_csv_path = DATAOUTPUT / 'dataset_from_ego.csv'
-    states.to_csv(output_csv_path, index=False) 
-    print(f"Processed data saved to {output_csv_path}")
+    #DATAOUTPUT = Path(args.dataoutput)
+    #output_csv_path = DATAOUTPUT / f'dataset_{args.version}_{args.sensor}_{args.complexity}.csv'
+    #states.to_csv(output_csv_path, index=False) 
+    #print(f"Processed data saved to {output_csv_path}")
 
 
 
@@ -187,8 +181,8 @@ if __name__ == "__main__":
 #paste prediciton_...
     
 #load minidataset
-#python3 generate_dataset.py --dataroot 'data/sets/nuscenes' --version 'v1.0-mini'
+#python3 generate_dataset_multisensor.py --dataroot 'data/sets/nuscenes' --version 'v1.0-mini' --dataoutput '.'
 
 
 #load full dataset
-#python3 generate_dataset.py --dataroot /media/saramontese/Riccardo\ 500GB/NuScenesDataset/data/sets/nuscenes --version 'v1.0-trainval' --dataoutput /media/saramontese/Riccardo\ 500GB/NuScenesDataset/data/sets/nuscenes
+#python3 generate_dataset_from_ego.py --dataroot /media/saramontese/Riccardo\ 500GB/NuScenesDataset/data/sets/nuscenes --version 'v1.0-trainval' --dataoutput /media/saramontese/Riccardo\ 500GB/NuScenesDataset/data/sets/nuscenes

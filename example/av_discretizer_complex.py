@@ -1,8 +1,7 @@
 from enum import Enum, auto
 
 import numpy as np
-from typing import Tuple
-from typing import Dict
+from typing import Tuple, Union, Dict
 
 from pgeon.discretizer import Discretizer, Predicate
 
@@ -46,6 +45,28 @@ class Position():
         return hash((self.x, self.y))
     
 
+class DetectedObject():
+    def __init__(self, cam_type, category, attribute, visibility, count):
+        self.category = category # human.pedestrian.adult,human.pedestrian.child, human.pedestrian.police_officer, vehicle.bicycle, vehicle.car... 
+        self.attribute = attribute # cycle.with_rider, vehicle.stopped, pedestrian.standing...
+        self.visibility = visibility #1: 0-40%, 2: 40-60%, 3: 60-80%, 4: 80-100%
+        #Visibility Attribute :
+        #The visibility attribute specifies the percentage of object pixels visible in the panoramic view of all cameras.
+        #i.e. 80% means that considering all the cameras, 80% of the object is visible.
+        
+        self.qty = count #number of objects of this kind which are detected
+        self.cam_type = cam_type
+        #TODO: add distance from ego-vehicle, velocity of object
+
+    def __str__(self) -> str:
+        return f'DetectedObject({self.cam_type}, {self.category}, {self.attribute}, {self.visibility}, {self.qty})'
+
+    def __eq__(self, other):
+        return self.category == other.category and self.attribute == other.attribute and self.visibility == other.visibility and self.qty==other.qty #TODO: do i need  to compare qty as well?
+
+    def __hash__(self):
+        return hash((self.category, self.attribute, self.visibility, self.qty))
+
 
 class Action(Enum):
   IDLE = auto() 
@@ -69,6 +90,10 @@ class AVDiscretizer(Discretizer):
         super(AVDiscretizer, self).__init__()
 
         self.unique_states: Dict[str, int] = {}
+
+        self.state_to_be_discretized = ['x', 'y', 'velocity', 'yaw']
+        self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'heading_change_rate', 'acceleration']
+     
         self.velocity_thr = [0.2, 6, 11, 17, 22] #m/s while in km/h would be[0, 20, 40, 60, 80] 
         self.rotation_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
                              
@@ -87,19 +112,30 @@ class AVDiscretizer(Discretizer):
 
     
     def discretize(self,
-                   state: np.ndarray, detected_objects
+                   state: np.ndarray, detections
                    ) -> Tuple[Predicate, Predicate, Predicate]:
         x, y, velocity, rotation = state 
 
-        for camera in detected_objects:
-            pass
         pos_predicate = self.discretize_position((x,y))
         mov_predicate = self.discretize_speed(self.velocity_thr, velocity)
         rot_predicate = self.discretize_rotation(self.rotation_thr, rotation)
-
-        return (Predicate(Position, [pos_predicate.x, pos_predicate.y]),
+       
+        if detections is not None:
+            detected_objects = {cam_type: [
+                DetectedObject(cam_type = cam_type, category=key[0], attribute=key[1], visibility=key[2], count=value)
+                for cam in detections
+                for key, value in cam.items()
+            ] for cam_type in self.detection_cameras}
+            detected_predicates = [Predicate(DetectedObject, detected_objects[cam_type]) for cam_type in self.detection_cameras]
+            return (Predicate(Position, [pos_predicate.x, pos_predicate.y]),
+                Predicate(Velocity, [mov_predicate]),
+                Predicate(Rotation, [rot_predicate]),
+                *detected_predicates)
+        else:
+            return (Predicate(Position, [pos_predicate.x, pos_predicate.y]),
                 Predicate(Velocity, [mov_predicate]),
                 Predicate(Rotation, [rot_predicate]))
+        
 
     def discretize_position(self, position, chunk_size = 4):
         '''
@@ -142,19 +178,19 @@ class AVDiscretizer(Discretizer):
         """
         trajectory = []
         #get camera detected objects
-        detect_columns = [col for col in states.columns if 'detect' in col]
-        state_to_be_discretized = ['x', 'y', 'velocity', 'yaw']
-        state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'heading_change_rate', 'acceleration']
+        self.detection_cameras = [col for col in states.columns if 'detect' in col]
+        
         n_states = len(states)
-
         previous_scene_token = states.iloc[0]['scene_token']
+        
         for i in range(n_states-1):
             current_scene_token = states.iloc[i]['scene_token']
 
             # discretize current state
-            current_state_to_discretize = states.iloc[i][state_to_be_discretized].tolist()
-            #current_detection_info = states.iloc[i][detect_columns].tolist()
-            discretized_current_state = self.discretize(current_state_to_discretize)
+            current_state_to_discretize = states.iloc[i][self.state_to_be_discretized].tolist()
+            current_detection_info = states.iloc[i][self.detection_cameras].tolist() if len(self.detection_cameras)>0 else None
+
+            discretized_current_state = self.discretize(current_state_to_discretize, current_detection_info)
             current_state_str = self.state_to_str(discretized_current_state)
             current_state_id = self.add_unique_state(current_state_str)
 
@@ -164,8 +200,8 @@ class AVDiscretizer(Discretizer):
                 action_id = None
             else:
                 # Determine action based on the full state information
-                current_state_for_action = states.iloc[i][state_columns_for_action].tolist()
-                next_state_for_action = states.iloc[i+1][state_columns_for_action].tolist()
+                current_state_for_action = states.iloc[i][self.state_columns_for_action].tolist()
+                next_state_for_action = states.iloc[i+1][self.state_columns_for_action].tolist()
                 action = self.determine_action(current_state_for_action, next_state_for_action)
                 action_id = self.get_action_id(action)
 
@@ -177,9 +213,9 @@ class AVDiscretizer(Discretizer):
         
             trajectory.extend([current_state_id, action_id])        
         #add last state
-        last_state_to_discretize = states.iloc[n_states-1][state_to_be_discretized].tolist()
-        #last_state_detections = states.iloc[n_states-1][detect_columns].tolist()
-        discretized_last_state = self.discretize(last_state_to_discretize)
+        last_state_to_discretize = states.iloc[n_states-1][self.state_to_be_discretized].tolist()
+        last_state_detections = states.iloc[n_states-1][self.detection_cameras].tolist() if len(self.detection_cameras)>0 else None
+        discretized_last_state = self.discretize(last_state_to_discretize, last_state_detections)
         last_state_str = self.state_to_str(discretized_last_state)
         last_state_id = self.add_unique_state(last_state_str)
         trajectory.extend([last_state_id, None, None])        
@@ -251,23 +287,33 @@ class AVDiscretizer(Discretizer):
 
 
     def state_to_str(self,
-                     state: Tuple[Predicate, Predicate, Predicate]
+                     state: Tuple[Union[Predicate, ]]
                      ) -> str:
 
         return '&'.join(str(pred) for pred in state)
 
-    def str_to_state(self, state_str: str) -> Tuple[Predicate, Predicate, Predicate]:
-        pos_str, vel_str, rot_str = state_str.split('&')
+    
+    def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
+        split_str = state_str.split('&')
+        pos_str, vel_str, rot_str = split_str[0:2]
         
         x, y = map(int, pos_str[len("Position("):-1].split(','))
         
         mov_predicate = Velocity[vel_str[:-1].split('(')[1]]
         rot_predicate = Rotation[rot_str[:-1].split('(')[1]]
-        
-        return (Predicate(Position, [x, y]),
+     
+        if split_str[3:]:
+            detected_predicates = []
+            for cam_detections in split_str[3:]:
+                pass
+            # = state_str.split('&')[3:]           
+            return (Predicate(Position, [x, y]),
+                        Predicate(Velocity, [mov_predicate]),
+                        Predicate(Rotation, [rot_predicate]), *detected_predicates)
+        else: 
+            return (Predicate(Position, [x, y]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]))
-    
     
     def nearest_state(self, state, chunk_size = 4):
         #TODO: put chunk size as varible of the discretizer?

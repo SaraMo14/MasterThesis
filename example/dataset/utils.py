@@ -1,4 +1,6 @@
 import numpy as np
+from nuscenes.prediction import convert_global_coords_to_local
+import pandas as pd
 
 def velocity(current_translation, prev_translation, time_diff: float) -> float:
     """
@@ -44,3 +46,84 @@ def acceleration(current_velocity, prev_velocity,
     if time_diff == 0:
         return np.NaN
     return (current_velocity - prev_velocity) / time_diff
+
+
+def convert_coordinates( group: pd.DataFrame) -> pd.DataFrame:
+        """
+        Converts the global coordinates of an object in each row to local displacement  relative to its previous position and orientation.
+
+        This function iterates through a DataFrame where each row represents an object's state at a given time, including its position (x, y) and orientation (rotation).
+        It computes the local displacement (delta_local_x, delta_local_y) at each timestep, using the position and orientation from the previous timestep as the reference frame.
+
+        Args:
+            group (DataFrame): A DataFrame containing the columns 'x', 'y' (global position coordinates), and 'rotation' (object's orientation as a quaternion).
+
+        Returns:
+            DataFrame: The input DataFrame with two new columns added ('delta_local_x' and 'delta_local_y') that represent the local displacement relative to the
+                    previous position and orientation.
+
+        Note:
+            The first row of the output DataFrame will have 'delta_local_x' and 'delta_local_y'
+            set to 0.0, as there is no previous state to compare.
+        """
+
+        # Initialize the displacement columns for the first row
+        group['delta_local_x'], group['delta_local_y'] = 0.0, 0.0
+
+        for i in range(1, len(group)):
+            # Use the previous row's position as the origin for translation
+            translation = (group.iloc[i-1]['x'], group.iloc[i-1]['y'], 0)
+            
+            # Use the previous row's rotation; assuming constant rotation for simplicity
+            rotation = group.iloc[i-1]['rotation']
+            
+            # Current row's global coordinates
+            coordinates = group.iloc[i][['x', 'y']].values.reshape(1, -1)
+            
+            # Convert global coordinates to local based on the previous row's state
+            local_coords = convert_global_coords_to_local(coordinates, translation, rotation)
+            
+            # Update the DataFrame with the computed local displacements
+            group.at[group.index[i], 'delta_local_x'], group.at[group.index[i], 'delta_local_y'] = local_coords[0, 0], local_coords[0, 1]
+        
+        return group
+
+
+    
+def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculates velocity, acceleration, and heading change rate for each entry in a DataFrame,
+        assuming the DataFrame is sorted by timestamp. The function adds three new columns to the
+        DataFrame: 'velocity', 'acceleration', and 'heading_change_rate'.
+
+        Args:
+            group (DataFrame): A pandas DataFrame containing at least 'timestamp', 'x', 'y', and 'yaw'
+                            columns. 'timestamp' should be in datetime format, and the DataFrame should
+                            be sorted based on 'timestamp'.
+        
+        Returns:
+            DataFrame: The input DataFrame with three new columns added: 'velocity', 'acceleration', and
+                    'heading_change_rate', representing the calculated dynamics.
+                    
+        Note:
+            This function handles cases where consecutive timestamps might be identical (time_diffs == 0)
+            by avoiding division by zero and setting the respective dynamics values to NaN.
+        """
+        time_diffs = group['timestamp'].diff().dt.total_seconds()
+        
+        # Handle potential division by zero for velocity and acceleration calculations
+        valid_time_diffs = time_diffs.replace(0, np.nan)
+        
+        # Calculate displacement (Euclidean distance between consecutive points)
+        displacements = group[['x', 'y']].diff().pow(2).sum(axis=1).pow(0.5)
+        
+        # Meters / second.
+        group['velocity'] = displacements / valid_time_diffs
+        
+        # Meters / second^2.
+        group['acceleration'] = group['velocity'].diff() / valid_time_diffs
+        
+        # Radians / second.
+        group['heading_change_rate'] = group['yaw'].diff() / valid_time_diffs
+
+        return group

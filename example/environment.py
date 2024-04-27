@@ -41,6 +41,7 @@ class SelfDrivingEnvironment(Environment):
         return next_state, reward, False, None
     
     
+    #ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
     '''
     def apply_action(self, action: Action):
         """
@@ -50,7 +51,7 @@ class SelfDrivingEnvironment(Environment):
         delta_v = self.discretizer.frequency * (self.discretizer.eps_vel*2)
         delta_y = v * np.sin(yaw) * self.discretizer.frequency  
         delta_x = v * np.cos(yaw) * self.discretizer.frequency 
-
+        
 
         if action == Action.REVERSE:
             next_state = np.array([x, y - delta_y,v, yaw])
