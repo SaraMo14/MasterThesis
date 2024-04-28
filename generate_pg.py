@@ -30,6 +30,7 @@ if __name__ == '__main__':
     dtype_dict = {
         'modality': 'category',  # for limited set of modalities, 'category' is efficient
         'scene_token': 'str',  
+        'steering_angle': 'float64',  
         'timestamp': 'str',  # To enable datetime operations
         'rotation': 'object',  # Quaternion (lists)
         'x': 'float64',
@@ -42,7 +43,7 @@ if __name__ == '__main__':
         'delta_local_x': 'float64',
         'delta_local_y': 'float64'
     }
-    df = pd.read_csv(Path(data_folder) / 'dataset_from_ego_full.csv', dtype=dtype_dict, parse_dates=['timestamp'])
+    df = pd.read_csv(Path(data_folder) / 'dataset_v1.0-trainval_lidar_0.csv', dtype=dtype_dict, parse_dates=['timestamp'])
     trajectory = env.discretizer.compute_trajectory(df)
     recorder = TransitionRecorded()
     recorder.process_transitions(trajectory)
