@@ -6,8 +6,6 @@ import argparse
 import numpy as np
 from pathlib import Path
 import utils
-import os
-from concurrent.futures import ThreadPoolExecutor
 
 
 class NuScenesProcessor:
@@ -82,18 +80,15 @@ class NuScenesProcessor:
                                 for attribute in ann_info['attribute_tokens']:
                                     attribute_name = self.nuscenes.get('attribute', attribute)['name']
                                     category = ann_info['category_name']
+                                    #translation = np.array(self.nuscenes.get('translation', ann_info['translation']))
+                                    #TODO: add obj_velocity = self.nuscenes.box_velocity(ann_token)
                                     visibility = int(self.nuscenes.get('visibility', ann_info['visibility_token'])['token'])
-                                    if visibility >= 3:
-                                        key = (category, attribute_name, visibility)
+                                    if visibility >= 2:
+                                        key = (category, attribute_name) #,visibility)
                                         if key not in detected_objects[cam_type]:
                                             detected_objects[cam_type][key] = 0
                                         detected_objects[cam_type][key] += 1 
-                                        #detect_in_front[cam_type].append({
-                                    #    'category': category,
-                                    #    'attribute': attribute_name,
-                                    #    'visibility': visibility
-                                    #    #velocity: self.nuscenes.box_velocity(ann_token, max_time_diff: float = 1.5)
-                                    #})
+
 
             for cam_type in self.cameras:
                 samples.loc[samples['sample_token'] == sample_token, f'detect_{cam_type}'] = str(detected_objects[cam_type])
@@ -105,17 +100,16 @@ class NuScenesProcessor:
         scene = pd.DataFrame(self.nuscenes.scene)[['token', 'name']].rename(columns={'token': 'scene_token'}) #add scene name, useful to merge the CAN BUS data 
         sample = pd.DataFrame(self.nuscenes.sample)[['token', 'timestamp', 'scene_token']].rename(columns={'token': 'sample_token', 'timestamp': 'utime'}).merge(scene, on='scene_token')
 
-        if self.version != 'v1.0-mini':
-            merged_CAN_data_list = []
+        merged_CAN_data_list = []
 
-            # Get all scene names that are not in the blacklist
-            valid_scene_names = [name for name in scene['name'] if int(name[-4:]) not in self.nusc_can.can_blacklist]
+        valid_scene_names = [name for name in scene['name'] if int(name[-4:]) not in self.nusc_can.can_blacklist]
 
-            for scene_name in valid_scene_names:
-                steeranglefeedback_df = pd.DataFrame(self.nusc_can.get_messages(scene_name, 'steeranglefeedback', print_warnings=True))
-                sample_scene = sample[sample['name'] == scene_name]
-                sample_CAN_data = pd.merge_asof(sample_scene, steeranglefeedback_df, on='utime', direction='nearest', tolerance=10000)
-                merged_CAN_data_list.append(sample_CAN_data)
+        for scene_name in valid_scene_names:
+            steeranglefeedback_df = pd.DataFrame(self.nusc_can.get_messages(scene_name, 'steeranglefeedback', print_warnings=True))
+            sample_scene = sample[sample['name'] == scene_name]
+            sample_CAN_data = pd.merge_asof(sample_scene, steeranglefeedback_df, on='utime', direction='nearest', tolerance=10000)
+            merged_CAN_data_list.append(sample_CAN_data)
+            #TODO: add scenes with no CAN bus data
 
         merged_CAN_df = pd.concat(merged_CAN_data_list, ignore_index=True).drop(columns=['utime', 'name']).rename(columns={'value': 'steering_angle'})
         output_csv_path = Path(self.dataoutput) / 'can_data.csv'
@@ -136,13 +130,9 @@ class NuScenesProcessor:
         Returns:
             pd.DataFrame: A DataFrame containing processed scene data with dynamics calculations.
         """
-        
-
-
 
         sample = pd.read_csv(Path(self.dataoutput) / 'can_data.csv')
-        
-        
+
         # add front camera objects information
         if self.complexity > 0:
             sample = self.cam_detection(sample)

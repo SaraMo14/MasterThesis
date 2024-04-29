@@ -87,12 +87,9 @@ class AVDiscretizer(Discretizer):
 
     
     def discretize(self,
-                   state: np.ndarray, detected_objects
+                   state: np.ndarray
                    ) -> Tuple[Predicate, Predicate, Predicate]:
         x, y, velocity, rotation = state 
-
-        for camera in detected_objects:
-            pass
         pos_predicate = self.discretize_position((x,y))
         mov_predicate = self.discretize_speed(self.velocity_thr, velocity)
         rot_predicate = self.discretize_rotation(self.rotation_thr, rotation)
@@ -141,8 +138,6 @@ class AVDiscretizer(Discretizer):
                 List containing tuples of (current state ID, action ID, next state ID).
         """
         trajectory = []
-        #get camera detected objects
-        detect_columns = [col for col in states.columns if 'detect' in col]
         state_to_be_discretized = ['x', 'y', 'velocity', 'yaw']
         state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'heading_change_rate', 'acceleration']
         n_states = len(states)

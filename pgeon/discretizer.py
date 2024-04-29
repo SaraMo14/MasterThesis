@@ -12,6 +12,7 @@ class Predicate:
             self.value: List[Union[Enum, int]] = [value]
         else:
             self.value: List[Union[Enum, int]] = list(value)
+            
 
     def __eq__(self, other):
         if not isinstance(other, Predicate):

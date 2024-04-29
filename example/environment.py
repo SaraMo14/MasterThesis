@@ -1,7 +1,7 @@
 from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
 import numpy as np
-from example.av_discretizer import Position, Velocity, Action, Rotation, AVDiscretizer
+from example.av_discretizer_complex import Velocity, Action, Rotation, AVDiscretizer
 from pgeon.discretizer import Predicate
 
 

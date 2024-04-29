@@ -5,10 +5,11 @@ from example.environment import SelfDrivingEnvironment
 import pandas as pd
 from example.transition import TransitionRecorded
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', help='Input data folder of states and actions.', default=".")
+    parser.add_argument('--file', help='Input data file name of states and actions.', default="dataset_v1.0-mini_lidar_1.csv")
+    
     parser.add_argument('--normalize', help='Whether the probabilities are stored normalized or not',
                         action='store_true')
     parser.add_argument('--output', help='Which format to output the Policy Graph',
@@ -18,11 +19,11 @@ if __name__ == '__main__':
     
 
     args = parser.parse_args()
-    data_folder, verbose, normalize, output_format = args.input, args.verbose, args.normalize, args.output
+    data_folder, data_file, verbose, normalize, output_format = args.input, args.file, args.verbose, args.normalize, args.output
 
-    # Generate Policy Graph
     env = SelfDrivingEnvironment()
 
+    # Generate Policy Graph
     #from existing csv file
     #pg = PG.PolicyGraph.from_nodes_and_edges(str(Path(data_folder) / 'nuscenes_nodes.csv'), str(Path(data_folder) / 'nuscenes_edges.csv'), env, env.discretizer  )
 
@@ -43,7 +44,8 @@ if __name__ == '__main__':
         'delta_local_x': 'float64',
         'delta_local_y': 'float64'
     }
-    df = pd.read_csv(Path(data_folder) / 'dataset_v1.0-trainval_lidar_0.csv', dtype=dtype_dict, parse_dates=['timestamp'])
+    
+    df = pd.read_csv(Path(data_folder) / data_file, dtype=dtype_dict, parse_dates=['timestamp'])
     trajectory = env.discretizer.compute_trajectory(df)
     recorder = TransitionRecorded()
     recorder.process_transitions(trajectory)
