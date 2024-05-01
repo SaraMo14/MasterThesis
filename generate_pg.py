@@ -43,8 +43,9 @@ if __name__ == '__main__':
         'heading_change_rate': 'float64',
         'delta_local_x': 'float64',
         'delta_local_y': 'float64'
+        #'is_destination': 'str'
     }
-    
+
     df = pd.read_csv(Path(data_folder) / data_file, dtype=dtype_dict, parse_dates=['timestamp'])
     trajectory = env.discretizer.compute_trajectory(df)
     recorder = TransitionRecorded()

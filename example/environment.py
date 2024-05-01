@@ -1,7 +1,7 @@
 from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
 import numpy as np
-from example.av_discretizer_complex import Velocity, Action, Rotation, AVDiscretizer
+from example.av_discretizer_d1 import Velocity, Action, Rotation, AVDiscretizer
 from pgeon.discretizer import Predicate
 
 
@@ -19,7 +19,7 @@ class SelfDrivingEnvironment(Environment):
 
     # TODO Set seed, introduce randomness
     def reset(self, seed: Optional[int] = None) -> Any:
-        self.current_state = np.array([0,0,0,0]) #Predicate()
+        self.current_state = Predicate(0,0,0,0)
 
 
     def step(self, action:Action, is_destination) -> Tuple[Tuple[Predicate, Predicate, Predicate], float, bool]:
@@ -40,7 +40,7 @@ class SelfDrivingEnvironment(Environment):
 
         return next_state, reward, False, None
     
-    
+
     #ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
     '''
     def apply_action(self, action: Action):
@@ -159,8 +159,8 @@ class SelfDrivingEnvironment(Environment):
         
         Args:
         - agent: The agent following the policy.
-        - initial_state: The state from which to start (continuos).
-        - final_state: The final state to reach.
+        - initial_state: The state from which to start (discretized).
+        - final_state: The final state to reach (discretized)
         - max_steps: Maximum number of steps to prevent infinite loops.
         
         Returns:
@@ -181,9 +181,10 @@ class SelfDrivingEnvironment(Environment):
             total_reward +=reward
             step_count +=1
 
-            print(step_count)
+            print(f'step count: {step_count}')
             self.current_state = next_state
-            if np.array_equal(next_state,final_state):
+            
+            if next_state == final_state: #TODO: fix
                 reached_final = True
                 break
 

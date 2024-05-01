@@ -45,6 +45,21 @@ class Position():
         return hash((self.x, self.y))
     
 
+class DetectedObjectD1(): #0 or 1 if any object is present
+    def __init__(self, cam_type=None):
+        self.cam_type = cam_type 
+
+    def __str__(self) -> str:
+        return f'({self.cam_type})'
+
+    def __eq__(self, other):
+        return self.cam_type == other.cam_type 
+    
+    def __hash__(self):
+        return hash(self.cam_type)
+
+
+
 class DetectedObject():
     def __init__(self, cam_type, category, attribute, count):
         self.category = category # human.pedestrian.adult,human.pedestrian.child, human.pedestrian.police_officer, vehicle.bicycle, vehicle.car... 
@@ -53,15 +68,14 @@ class DetectedObject():
         self.cam_type = cam_type
 
     def __str__(self) -> str:
-        return f'{self.cam_type}({self.category}, {self.attribute}, {self.qty})'
+        return f'({self.cam_type},{self.category}, {self.attribute}, {self.qty})'
 
     def __eq__(self, other):
         return self.category == other.category and self.attribute == other.attribute and self.qty==other.qty #TODO: do i need  to compare qty as well?
 
     def __hash__(self):
         return hash((self.category, self.attribute, self.qty))
-
-
+    
 class Action(Enum):
   IDLE = auto() 
   TURN_LEFT = auto()
@@ -86,7 +100,7 @@ class AVDiscretizer(Discretizer):
         self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] #yaw not needed 
         self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
      
-        self.velocity_thr = [0.2, 6, 11, 17, 22] #m/s while in km/h would be[0, 20, 40, 60, 80] 
+        self.velocity_thr = [0.2, 6, 11, 17] #m/s while in km/h would be[0, 20, 40, 60, 80] 
         #self.yaw_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
         self.rotation_thr = [-3, -0.3, 0.3 , 3]
         self.chunk_size = 4
@@ -307,8 +321,8 @@ class AVDiscretizer(Discretizer):
             print(split_str[4:])
             detected_predicates = []
             for cam_detections in split_str[3:]:
-                cam_type, category, attribute, count = map(str.strip, cam_detections.split(','))
-                detected_predicates.append(Predicate(DetectedObject(cam_type, category, attribute, int(count))))
+                cam_type, category, attribute, count = map(str.strip, cam_detections[:-2].split(','))
+                detected_predicates.append(Predicate(DetectedObject, [DetectedObject(cam_type, category, attribute, int(count))]))
             return (Predicate(Position, [x, y]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]), *detected_predicates)
@@ -317,35 +331,41 @@ class AVDiscretizer(Discretizer):
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]))
     
+    #TODO: review
     def nearest_state(self, state):
-        og_position, og_velocity, og_angle = state
-        
+        og_position, og_velocity, og_angle, *detections = state
+
+        print(f'detections: {detections}')
+
         x,y = og_position.value
         # Generate nearby positions considering discretization
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                new_x,new_y = x + dx * self.chunk_size, y + dy * self.chunk_size
+        for dx in [-2, -1, 0, 1, 2]:
+            for dy in [-2, -1, 0, 1, 2]:
+                new_x,new_y = x + dx, y + dy
                 if (new_x, new_y) != (x, y):
-                    yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle
+                    yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle, *detections
 
         for v in Velocity:
             if v != og_velocity.value:
-                yield og_position, Predicate(Velocity, v), og_angle
+                yield og_position, Predicate(Velocity, v), og_angle, *detections
         for r in Rotation:
             if r != og_angle.value:
-                yield og_position, og_velocity, Predicate(Rotation, r)
-
-        for dx in [-self.chunk_size/2, -self.chunk_size/4, 0, self.chunk_size/4, self.chunk_size/2]: #[-2, -1, 0, 1, 2]:
-            for dy in [-self.chunk_size/2, -self.chunk_size/4, 0, self.chunk_size/4, self.chunk_size/2]: #[-2, -1, 0, 1, 2]:
-                new_x,new_y = x + dx * self.chunk_size, y + dy * self.chunk_size
-
+                yield og_position, og_velocity, Predicate(Rotation, r), *detections
+        
+        #for obj in (0, 'detect_CAM_FRONT', 'detect_CAM_BACK'):
+        #    if obj is not in detections:
+        #        yield og_position, og_velocity, og_angle, 
+        
+        for dx in [-2, -1, 0, 1, 2]:
+            for dy in [-2, -1, 0, 1, 2]:
+                new_x,new_y = x + dx,y + dy
                 if (new_x, new_y) != (x, y):
                     for v in Velocity:
                         if v != og_velocity.value:
-                            yield Predicate(Position, [new_x, new_y]), Predicate(Velocity, v), og_angle
+                            yield Predicate(Position, [new_x, new_y]), Predicate(Velocity, v), og_angle, *detections
                     for r in Rotation:
                         if r != og_angle.value:
-                            yield Predicate(Position, [new_x, new_y]), og_velocity, Predicate(Rotation, r)
+                            yield Predicate(Position, [new_x, new_y]), og_velocity, Predicate(Rotation, r), *detections
 
 
     def all_actions(self):

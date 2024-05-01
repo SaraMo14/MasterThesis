@@ -73,7 +73,7 @@ class NuScenesProcessor:
         return samples
 
 
-
+    
     def process_scene_data(self) -> pd.DataFrame:
         """
         Processes agent data from the nuScenes dataset, creating a DataFrame with additional columns for velocity,
@@ -94,8 +94,8 @@ class NuScenesProcessor:
         if self.complexity > 0:
             sample = self.cam_detection(sample)
         #complexity == 0 --> dataset without any knowledge of surrounding objects.
-
-        
+        #
+        #start = time.time()
         sample_data = pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']]
         ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
         ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
@@ -120,11 +120,12 @@ class NuScenesProcessor:
         df_updated = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
 
         # mark destination state
-        df_updated['is_destination'] = False
-        for scene_token in df_updated['scene_token'].unique():
-            last_index = df_updated[df_updated['scene_token'] == scene_token].index[-1]
-            df_updated.at[last_index, 'is_destination'] = True
+        #df_updated['is_destination'] = False
+        #for scene_token in df_updated['scene_token'].unique():
+            #last_index = df_updated[df_updated['scene_token'] == scene_token].index[-1]
+            #df_updated.at[last_index, 'is_destination'] = True
 
+        #print(f'time: {time.time()-start}')
         return df_updated
 
 

@@ -100,6 +100,7 @@ class PolicyGraph(nx.MultiDiGraph):
                     'frequency': state_freq,
                     'is_destination': is_destination
                 }
+                
                 pg.add_node(node_info[int(state_id)]['value'], 
                             probability=state_prob,
                             frequency=state_freq,
@@ -335,7 +336,7 @@ class PolicyGraph(nx.MultiDiGraph):
         # Predicate has at least 1 out edge.
         if len(possible_actions) > 0:
             for _, action, v, weight in possible_actions:
-                #TODO: I subtract -1 since the Actions have id starting from 1 (it's an Enum). Is this correct?
+                #NOTE: I subtract -1 since the Actions have id starting from 1 (it's an Enum).
                 #otherwise i get index out of bound error
                 result[self.discretizer.all_actions()[action-1]] += weight
             return sorted(result.items(), key=lambda x: x[1], reverse=True)
@@ -447,6 +448,7 @@ class PolicyGraph(nx.MultiDiGraph):
 
         return result
 
+    #modified
     def question3(self, predicate, action, greedy=False, verbose=False):
         #TODO: can be improved following the paper below (reward decomposition)
         #ref: https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9659472
@@ -800,11 +802,11 @@ class PGBasedPolicy(Agent):
             raise NotImplementedError
     
     #modified
+    #TODO: fix how we handle is_destination
     def act_upon_discretized_state(self, predicate):
         is_destination = False
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
             action_prob_dist = self._get_action_probability_dist(predicate)
-            #print(action_prob_dist)
             is_destination = self.pg.nodes[predicate]['is_destination']
         else:
             if self.node_not_found_mode == PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM:
@@ -813,6 +815,8 @@ class PGBasedPolicy(Agent):
                 nearest_predicate = self.pg.get_nearest_predicate(predicate)
                 if nearest_predicate is not None:  
                     action_prob_dist = self._get_action_probability_dist(nearest_predicate)
+                    if action_prob_dist == []: #NOTE: we handle the case in which there is a nearest state, but this state has no 'next_state' (i.e. destination node of a scene)
+                        action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
                 else:
                     # Fallback if no nearest predicate is found
                     action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
@@ -820,7 +824,7 @@ class PGBasedPolicy(Agent):
                 raise NotImplementedError
         return self._get_action(action_prob_dist), is_destination 
 
-    #modified
+    #TODO: understand if discrete or continuous
     def act(self,
             state
             ) -> Any:
@@ -833,22 +837,25 @@ class PGBasedPolicy(Agent):
             is_destination: 1 if input state is a (intermediate) destination state, 0 otherwise
         '''
         #predicate = self.pg.discretizer.discretize(state)
-        print(state)
+        #print(state)
         return self.act_upon_discretized_state(state)
 
 
    
+    """
 
-
-    def get_next_state(self, current_state, action):
-
-        #compute P(s'|s,a)       
+    def get_state_transition(self, current_state, action):
+        '''
+        Function that computes next state based on compute max(P(s'|s,a))?
+        '''
+            
         frequency_s_a = sum(self.pg.get_edge_data(current_state, next_state, action)['frequency'] for next_state in self.pg[current_state])
         frequency_s_a_s = defaultdict(lambda: 0)
 
         for next_state in self.pg[current_state]:
             frequency_s_a_s[next_state] = self.pg[current_state][next_state][action]['frequency']
-            next_state_probs = [(s/frequency_s_a, frequency_s_a_s[s]) for s in frequency_s_a_s]
         
-        #how to select next state based on the probability distribution?
-        pass
+        next_state_distr = [(next_state, frequency_s_a_s[next_state]/frequency_s_a) for next_state in frequency_s_a_s]
+        #TODO:return max value or sample it?
+        return max(next_state_distr)
+    """

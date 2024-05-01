@@ -139,38 +139,35 @@ class NuScenesProcessor:
         #complexity == 0 --> dataset without any knowledge of surrounding objects.
 
 
-        
         sample_data = pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']]
-        ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
-        ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
-        
-        merged_df = sample.merge(sample_data, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
-
+        #select only data related to selected sensor type (i.e. lidar)
         calibrated_sensors = pd.DataFrame(self.nuscenes.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
         sensors = pd.DataFrame(self.nuscenes.sensor).rename(columns={'token': 'sensor_token'})
         sensors = sensors[sensors['modality'] == self.sensor].merge(calibrated_sensors, on='sensor_token').drop(columns=['rotation','translation', 'channel','camera_intrinsic', 'sensor_token'])
-        merged_df = sensors.merge(merged_df, on='calibrated_sensor_token' ).drop(columns=['calibrated_sensor_token'])
-        
-      
-        merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp'], unit='us')
+        merged_df = sensors.merge(sample_data, on='calibrated_sensor_token' ).drop(columns=['calibrated_sensor_token'])
+               
+        ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
+        ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
+    
 
-        merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw)
+        merged_df = sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
+        merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw).drop(columns=['rotation'])
 
-        merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
-        
         # Group by 'scene_token' and calculate dynamics
+        merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp'], unit='us')
+        merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True) #TODO: do I need it or is it already ordered?
         final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics).dropna()
 
         # Compute  for each scene, the movement of the agent in local x and y
-        df_updated = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
+        final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
 
         # mark destination state
-        df_updated['is_destination'] = False
-        for scene_token in df_updated['scene_token'].unique():
-            last_index = df_updated[df_updated['scene_token'] == scene_token].index[-1]
-            df_updated.at[last_index, 'is_destination'] = True
+        #final_df['is_destination'] = False
+        #for scene_token in final_df['scene_token'].unique():
+        #    last_index = final_df[final_df['scene_token'] == scene_token].index[-1]
+        #    final_df.at[last_index, 'is_destination'] = True
 
-        return df_updated
+        return final_df
 
 
     def run_processing(self):
@@ -187,7 +184,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--dataroot', required=True, type=str, help='Path to the nuScenes dataset directory.')
     parser.add_argument('--dataoutput', required=True, type=str, help='Path for the output CSV file directory.')
-    parser.add_argument('--version', required=True, type=str, help='Version of the nuScenes dataset to process.') #v1.0-mini, v1.0-trainval, etc. 
+    parser.add_argument('--version', required=True, type=str, choices=["v1.0-mini", "v1.0-trainval"], help='Version of the nuScenes dataset to process.')  
     parser.add_argument('--key_frames', required=False, type=lambda x: (str(x).lower() == 'true'), default=True, help='Flag to process key frames only (True/False).')
     parser.add_argument('--sensor', required=False, type=str, default="lidar", choices=["lidar", "radar"], help='Specific sensor modality to filter for. Options: "lidar", "radar".')
     parser.add_argument('--complexity', required=True, type=int, default=0, choices=[0,1,2,3], help='Level of complexity of the dataset.')
@@ -197,17 +194,8 @@ if __name__ == "__main__":
 
     #DATAROOT = Path(args.dataroot) #'/data/sets/nuscenes'
 
-    #nuscenes = NuScenes(args.version, dataroot=DATAROOT, verbose=True)
-
     processor = NuScenesProcessor( args.dataroot, args.version, args.dataoutput, args.key_frames, args.sensor, args.complexity)
     processor.run_processing()
-
-    #DATAOUTPUT = Path(args.dataoutput)
-    #output_csv_path = DATAOUTPUT / f'dataset_{args.version}_{args.sensor}_{args.complexity}.csv'
-    #states.to_csv(output_csv_path, index=False) 
-    #print(f"Processed data saved to {output_csv_path}")
-
-
 
 
 

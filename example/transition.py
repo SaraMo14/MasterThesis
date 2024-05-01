@@ -2,7 +2,6 @@ from collections import defaultdict
 import csv
 import pandas as pd
 import os
-from pgeon.policy_graph import PolicyGraph
 
 class TransitionRecorded:
     def __init__(self):
@@ -11,12 +10,12 @@ class TransitionRecorded:
         # Structure: {state: {action: {next_state: count}}}
         self.destination_states = set()
 
-    def record_transition(self, current_state, next_state, action):
-        self.state_counter[current_state] +=1
-        if action is not None:
-            self.transition_counter[current_state][action][next_state] += 1 
-        else:
-            self.destination_states.add(current_state)
+    #def record_transition(self, current_state, next_state, action):
+        #self.state_counter[current_state] +=1
+        #if action is not None:
+            #self.transition_counter[current_state][action][next_state] += 1 
+        #else:
+            #self.destination_states.add(current_state)
 
     def calculate_probabilities(self):
         total_states = sum(self.state_counter.values())
@@ -43,8 +42,12 @@ class TransitionRecorded:
             current_state = trajectories[i]
             action = trajectories[i+1]
             next_state = trajectories[i+2]
-            self.record_transition(current_state, next_state, action)
-
+            #self.record_transition(current_state, next_state, action)
+            self.state_counter[current_state] +=1
+            if action is not None:
+                self.transition_counter[current_state][action][next_state] += 1 
+            else:
+                self.destination_states.add(current_state)
 
 
     def save_to_csv(self, states_info, path="."):
