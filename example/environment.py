@@ -1,17 +1,18 @@
 from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
 import numpy as np
-from example.av_discretizer_d1 import Velocity, Action, Rotation, AVDiscretizer
+from example.discretizer.utils import Velocity, Action, Rotation
+from example.discretizer.discretizer import AVDiscretizer
 from pgeon.discretizer import Predicate
 
 
 class SelfDrivingEnvironment(Environment):
     environment_name = "nuScenes Environemnt"
 
-    def __init__(self):
+    def __init__(self, discretizer:AVDiscretizer):
 
         self.current_state = None
-        self.discretizer = AVDiscretizer()
+        self.discretizer = discretizer
         self.WEIGHT_SPEED = 1
         self.WEIGHT_SAFETY = 2
         self.WEIGHT_SMOOTHNESS = 1
@@ -41,11 +42,12 @@ class SelfDrivingEnvironment(Environment):
         return next_state, reward, False, None
     
 
-    #ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
     '''
     def apply_action(self, action: Action):
         """
-        Function that given current state and action returns the next continuous state
+        Function that given current state and action returns the next continuous state.
+        ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
+
         """
         x, y, v, yaw = self.current_state
         delta_v = self.discretizer.frequency * (self.discretizer.eps_vel*2)
@@ -82,7 +84,7 @@ class SelfDrivingEnvironment(Environment):
         return np.array(next_state)
     '''
       
-    def compute_reward_disc(self, action, is_destination):
+    def compute_reward(self, action, is_destination):
         """
         Computes the reward for transitioning from the current_state to next_state via action.
 
@@ -96,12 +98,15 @@ class SelfDrivingEnvironment(Environment):
             float: final reward
         """
 
+        #TODO: penalize progress away from the goal, reward progress toward the goal
+        #TODO: rewards between -1,0,1
         # Initialize reward components
         speed_reward = 0
         safety_reward = 0
         smoothness_reward = 0
         progress_reward = 0
 
+        #TODO: modify to handle discretized state
         vel_predicate = self.current_state[1].value[0]
         velocity = Velocity[str(vel_predicate)[:-1].split('(')[1]]
         yaw_predicate = self.current_state[2].value[0]
@@ -134,8 +139,7 @@ class SelfDrivingEnvironment(Environment):
         else:
             smoothness_reward +=0.1
 
-        # Encourage actions that lead to progress towards a goal.
-        # Give positive reward if current state is a intermediate destination
+        # To encourage actions that lead to progress towards a goal, give positive reward if current state is a intermediate destination
         if is_destination:
             progress_reward += 10
 
@@ -150,44 +154,3 @@ class SelfDrivingEnvironment(Environment):
         return total_reward#, speed_reward, safety_reward, smoothness_reward, progress_reward
         
 
-
-    #@staticmethod
-    #TODO:  update
-    def compute_total_reward(self, agent, initial_state, final_state, max_steps=600):
-        """
-        Computes the total reward obtained by following a policy from an initial state to a final state.
-        
-        Args:
-        - agent: The agent following the policy.
-        - initial_state: The state from which to start (discretized).
-        - final_state: The final state to reach (discretized)
-        - max_steps: Maximum number of steps to prevent infinite loops.
-        
-        Returns:
-        - total_reward: The total reward obtained.
-        - reached_final: Boolean indicating if the final state was reached.
-        """
-        total_reward = 0
-        step_count = 0
-        reached_final = False
-
-        self.current_state = initial_state
-
-        while step_count < max_steps:
-            action_id, is_destination = agent.act(self.current_state)
-            action = self.discretizer.get_action_from_id(action_id)
-            print(action) 
-            next_state, reward, _, _ = self.step(action, is_destination)
-            total_reward +=reward
-            step_count +=1
-
-            print(f'step count: {step_count}')
-            self.current_state = next_state
-            
-            if next_state == final_state: #TODO: fix
-                reached_final = True
-                break
-
-        return total_reward, reached_final
-        
-    

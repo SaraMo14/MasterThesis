@@ -87,9 +87,8 @@ class TransitionRecorded:
             predicate = next((state_str for state_str, id in states_info.items() if id == state_id), "")
             is_destination = 1 if state_id in self.destination_states else 0
             states_data.append([state_id, predicate, prob, self.state_counter[state_id], is_destination])
-        
+            
         states_df = pd.DataFrame(states_data, columns=['id', 'value', 'p(s)', 'frequency', 'is_destination'])
-        
         actions_data = []
         for (state, action, next_state), prob in transition_probabilities.items():
             actions_data.append([state, next_state, action, prob, self.transition_counter[state][action][next_state]])

@@ -68,7 +68,7 @@ class NuScenesProcessor:
                                     #})
 
             for cam_type in self.cameras:
-                samples.loc[samples['sample_token'] == sample_token, f'detect_{cam_type}'] = str(detected_objects[cam_type])
+                samples.loc[samples['sample_token'] == sample_token, f'{cam_type}'] = str(detected_objects[cam_type])
 
         return samples
 

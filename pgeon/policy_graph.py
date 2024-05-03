@@ -4,7 +4,7 @@ from typing import Optional, DefaultDict, Tuple, Any, List, Union, Set
 import csv
 import pickle
 import random
-
+import time
 import gymnasium as gym
 import networkx as nx
 import numpy as np
@@ -31,6 +31,9 @@ class PolicyGraph(nx.MultiDiGraph):
         self._is_fit = False
         self._trajectories_of_last_fit: List[List[Any]] = []
 
+
+
+
     @staticmethod
     def from_pickle(path: str):
         path_includes_pickle = path[-7:] == '.pickle'
@@ -41,6 +44,7 @@ class PolicyGraph(nx.MultiDiGraph):
     def from_data_frame(states_df, actions_df, environment, discretizer):
         pg = PolicyGraph(environment, discretizer)
         node_info = {}
+        
         for index, row in states_df.iterrows():
             state_id = int(row['id'])
             value = row['value']
@@ -197,6 +201,9 @@ class PolicyGraph(nx.MultiDiGraph):
             step_counter += 1
 
         return trajectory
+    
+    
+    
 
     def _update_with_trajectory(self,
                                 trajectory: List[Any]
@@ -233,30 +240,101 @@ class PolicyGraph(nx.MultiDiGraph):
                     self[node][dest_node][action]['probability'] = \
                         self[node][dest_node][action]['frequency'] / total_frequency
 
-    def fit(self,
-            agent,
-            num_episodes: int = 10,
-            max_steps: int = None,
-            update: bool = False
-            ):
 
-        if not update:
-            self.clear()
-            self._trajectories_of_last_fit = []
-            self._is_fit = False
 
-        progress_bar = tqdm.tqdm(range(num_episodes))
-        progress_bar.set_description('Fitting PG...')
-        for ep in progress_bar:
-            trajectory_result: List[Any] = self._run_episode(agent, max_steps=max_steps, seed=ep)
-            self._update_with_trajectory(trajectory_result)
-            self._trajectories_of_last_fit.append(trajectory_result)
 
-        self._normalize()
+    def test(self, scenes, agent, verbose = False, max_steps = 100):
+        """
+        Tests the PGAgent in the given scenes (episodes).
 
-        self._is_fit = True
+        Args:
+            scenes: list of (scene_id, scene_start_state, scene_end_state)
+            agent: PolicyBasedAgent
+            verbose:
+                    
+        """
+        print('---------------------------------')
+        print('* START TESTING\n')
 
-        return self
+        self.pg_metrics['AER'] = []
+        self.pg_metrics['STD'] = []
+
+        #start_time = time.time()
+
+        #rewards = []
+
+        for scene_id, initial_state, final_state in scenes:
+            #self.env.reset()
+            reached_final = False
+            step_count = 0
+            total_reward = 0
+
+            self.current_state = initial_state
+        
+            while step_count < max_steps:
+                action_id, is_destination = agent.act(self.current_state)
+                action = self.discretizer.get_action_from_id(action_id)
+                next_state, reward, _, _ = self.env.step(action, is_destination)
+                total_reward +=reward
+                
+                self.current_state = next_state
+                
+                print(f'step count: {step_count}')
+                step_count +=1
+
+                if next_state == final_state: #TODO: fix
+                    reached_final = True
+                    break
+        
+        # Once we finished the feeding, then we build the Graph
+        print('* END TESTING')
+        print('---------------------------------')
+        print('* RESULTS')
+        #print('\t- Average Reward:', sum(self.pg_metrics['AER']) / len(self.pg_metrics['AER']))
+        #print('\t- Standard Deviation:', sum(self.pg_metrics['STD']) / len(self.pg_metrics['STD']), '\n')
+
+
+    
+    #TODO:  update
+    def compute_total_reward(self, agent, scenes, max_steps=100):
+        """
+        Computes the total reward obtained by following a policy from an initial state to a final state.
+        
+        Args:
+        - agent: The agent following the policy.
+        - initial_state: The state from which to start (discretized).
+        - final_state: The final state to reach (discretized)
+        - max_steps: Maximum number of steps to prevent infinite loops.
+        
+        Returns:
+        - total_reward: The total reward obtained.
+        - reached_final: Boolean indicating if the final state was reached.
+        """
+        total_reward = 0
+        step_count = 0
+        reached_final = False
+
+        self.current_state = initial_state
+
+        while step_count < max_steps:
+            action_id, is_destination = agent.act(self.current_state)
+            action = self.discretizer.get_action_from_id(action_id)
+            next_state, reward, _, _ = self.step(action, is_destination)
+            total_reward +=reward
+            step_count +=1
+
+            print(f'step count: {step_count}')
+            self.current_state = next_state
+            
+            if next_state == final_state: #TODO: fix
+                reached_final = True
+                break
+
+        return total_reward, reached_final
+        
+    
+
+
 
     ######################
     # EXPLANATIONS
@@ -416,6 +494,7 @@ class PolicyGraph(nx.MultiDiGraph):
         :param destination: Destination as Tuple[Predicate, Predicate, Predicate]
         :return dict: Dict with the different values
         """
+        #TODO: differentiate based on the discretizer complexity
         if type(origin) is str:
             origin = origin.split(',')
         if type(destination) is str:
@@ -801,7 +880,6 @@ class PGBasedPolicy(Agent):
         else:
             raise NotImplementedError
     
-    #modified
     #TODO: fix how we handle is_destination
     def act_upon_discretized_state(self, predicate):
         is_destination = False
@@ -817,6 +895,8 @@ class PGBasedPolicy(Agent):
                     action_prob_dist = self._get_action_probability_dist(nearest_predicate)
                     if action_prob_dist == []: #NOTE: we handle the case in which there is a nearest state, but this state has no 'next_state' (i.e. destination node of a scene)
                         action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
+                    
+                    is_destination = self.pg.nodes[nearest_predicate]['is_destination']
                 else:
                     # Fallback if no nearest predicate is found
                     action_prob_dist = [(a, 1 / len(self.all_possible_actions)) for a in self.all_possible_actions]
@@ -824,21 +904,19 @@ class PGBasedPolicy(Agent):
                 raise NotImplementedError
         return self._get_action(action_prob_dist), is_destination 
 
-    #TODO: understand if discrete or continuous
     def act(self,
             state
             ) -> Any:
         '''
         Args:
-            Current discretized state.
+            Current continuous state.
 
         Output:
             Next action, given the input state.
             is_destination: 1 if input state is a (intermediate) destination state, 0 otherwise
         '''
-        #predicate = self.pg.discretizer.discretize(state)
-        #print(state)
-        return self.act_upon_discretized_state(state)
+        predicate = self.pg.discretizer.discretize(state)
+        return self.act_upon_discretized_state(predicate)
 
 
    

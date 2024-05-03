@@ -3,6 +3,7 @@ from nuscenes.can_bus.can_bus_api import NuScenesCanBus
 from nuscenes import NuScenes
 from nuscenes.utils.geometry_utils import BoxVisibility
 import argparse
+import dask.dataframe as dd
 import time
 from pathlib import Path
 import utils
@@ -46,7 +47,8 @@ class NuScenesProcessor:
     '''
     
 
-    def cam_detection(self, samples: pd.DataFrame):
+
+    def cam_detection(self, samples: dd.DataFrame):
         """
         Given a sample in a scene, returns the objects in front of the vehicle, the action they are performing,
         and the visibility (0=min, 4=100%) from the ego-vehicle.
@@ -61,36 +63,40 @@ class NuScenesProcessor:
         For each annotation, check from which camera it is from.
 
         """
-        for sample_token in samples['sample_token']:
-            sample = self.nuscenes.get('sample', sample_token)
-            #detect_in_front = {cam_type: [] for cam_type in self.cameras}
-            detected_objects = {cam_type: {} for cam_type in self.cameras}
+        def process_partition(partition):
+            processed_partition = partition.copy()  # Create a copy of the partition to avoid modifying it in place
+            for sample_token in partition['sample_token']:
+                sample = self.nuscenes.get('sample', sample_token)
+                detected_objects = {cam_type: {} for cam_type in self.cameras}
 
-            if len(sample['anns']) > 0:  # Check if sample has annotated objects
-                for ann_token in sample['anns']:
-                    for cam_type in self.cameras:
-                        _, boxes, _ = self.nuscenes.get_sample_data(sample['data'][cam_type], box_vis_level=BoxVisibility.ANY,
-                                                                    selected_anntokens=[ann_token])#, use_flat_vehicle_coordinates=True)
-                        if len(boxes) > 0:
-                            ann_info = self.nuscenes.get('sample_annotation', ann_token)
-                            if len(ann_info['attribute_tokens']) > 0:
-                                for attribute in ann_info['attribute_tokens']:
-                                    attribute_name = self.nuscenes.get('attribute', attribute)['name']
-                                    category = ann_info['category_name']
-                                    #translation = np.array(self.nuscenes.get('translation', ann_info['translation']))
-                                    #TODO: add obj_velocity = self.nuscenes.box_velocity(ann_token)
-                                    visibility = int(self.nuscenes.get('visibility', ann_info['visibility_token'])['token'])
-                                    if visibility >= 2:
-                                        key = (category, attribute_name) #,visibility)
-                                        if key not in detected_objects[cam_type]:
-                                            detected_objects[cam_type][key] = 0
-                                        detected_objects[cam_type][key] += 1 
+                if len(sample['anns']) > 0:  # Check if sample has annotated objects
+                    for ann_token in sample['anns']:
+                        for cam_type in self.cameras:
+                            _, boxes, _ = self.nuscenes.get_sample_data(sample['data'][cam_type], box_vis_level=BoxVisibility.ANY,
+                                                                        selected_anntokens=[ann_token])
+                            if len(boxes) > 0:
+                                ann_info = self.nuscenes.get('sample_annotation', ann_token)
+                                if len(ann_info['attribute_tokens']) > 0:
+                                    for attribute in ann_info['attribute_tokens']:
+                                        attribute_name = self.nuscenes.get('attribute', attribute)['name']
+                                        category = ann_info['category_name']
+                                        visibility = int(self.nuscenes.get('visibility', ann_info['visibility_token'])['token'])
+                                        if visibility >= 2:
+                                            key = (category, attribute_name)
+                                            if key not in detected_objects[cam_type]:
+                                                detected_objects[cam_type][key] = 0
+                                            detected_objects[cam_type][key] += 1 
 
+                for cam_type in self.cameras:
+                    processed_partition.loc[processed_partition['sample_token'] == sample_token, f'{cam_type}'] = str(detected_objects[cam_type])
 
-            for cam_type in self.cameras:
-                samples.loc[samples['sample_token'] == sample_token, f'{cam_type}'] = str(detected_objects[cam_type])
+            return processed_partition
 
-        return samples
+        # Define metadata for the output DataFrame
+        meta = pd.DataFrame({cam_type: [''] for cam_type in self.cameras}, dtype='str')
+
+        return samples.map_partitions(process_partition, meta=meta)
+
 
 
     def process_CAN_data(self):
@@ -128,7 +134,8 @@ class NuScenesProcessor:
             pd.DataFrame: A DataFrame containing processed scene data with dynamics calculations.
         """
 
-        sample = pd.read_csv(Path(self.dataoutput) / 'can_data.csv')
+        sample = dd.read_csv(Path(self.dataoutput) / 'can_data.csv')
+
 
         # add front camera objects information
         if self.complexity > 0:
@@ -136,27 +143,26 @@ class NuScenesProcessor:
         #complexity == 0 --> dataset without any knowledge of surrounding objects.
 
 
-        sample_data = pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']]
-        #select only data related to selected sensor type (i.e. lidar)
-        calibrated_sensors = pd.DataFrame(self.nuscenes.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
-        sensors = pd.DataFrame(self.nuscenes.sensor).rename(columns={'token': 'sensor_token'})
+        # Select only data related to the selected sensor type (e.g., lidar)
+        sample_data = dd.from_pandas(pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token','calibrated_sensor_token']], npartitions=10)
+        calibrated_sensors = dd.from_pandas(pd.DataFrame(self.nuscenes.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'}), npartitions=10)
+        sensors = dd.from_pandas(pd.DataFrame(self.nuscenes.sensor).rename(columns={'token': 'sensor_token'}), npartitions=10)
         sensors = sensors[sensors['modality'] == self.sensor].merge(calibrated_sensors, on='sensor_token').drop(columns=['rotation','translation', 'channel','camera_intrinsic', 'sensor_token'])
         merged_df = sensors.merge(sample_data, on='calibrated_sensor_token' ).drop(columns=['calibrated_sensor_token'])
-               
-        ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
-        ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
-    
 
-        merged_df = sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
+        ego_pose = dd.from_pandas(pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'}), npartitions=10)
+        #ego_pose[['x', 'y', 'z']] = dd.from_pandas(ego_pose['translation'].apply(pd.Series), npartitions=10, meta=pd.DataFrame(columns=['x', 'y', 'z'], dtype=float))
+
+        merged_df = dd.from_pandas(sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation']), npartitions=10)
         merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw).drop(columns=['rotation'])
 
         # Group by 'scene_token' and calculate dynamics
-        merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp'], unit='us')
-        merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True) #TODO: do I need it or is it already ordered?
-        final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics).dropna()
+        merged_df['timestamp'] = dd.to_datetime(merged_df['timestamp'], unit='us')
+        merged_df = merged_df.set_index('timestamp').persist()
+        final_df = merged_df.groupby('scene_token').apply(utils.calculate_dynamics).dropna()
 
-        # Compute  for each scene, the movement of the agent in local x and y
-        final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
+        # Compute for each scene, the movement of the agent in local x and y
+        final_df = dd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
 
         # mark destination state
         #final_df['is_destination'] = False
@@ -170,12 +176,11 @@ class NuScenesProcessor:
     def run_processing(self):
         self.process_CAN_data() #store file with processed CAN data
         start = time.time()
-        
         states = self.process_scene_data()
         output_csv_path = Path(self.dataoutput) / f'dataset_{self.version}_{self.sensor}_{self.complexity}.csv'
-        states.to_csv(output_csv_path, index=False)
-        
+        states.compute().to_csv(output_csv_path, index=False)
         print(f'end: {time.time() - start}')
+
         print(f"Processed data saved to {output_csv_path}")
 
 

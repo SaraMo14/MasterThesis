@@ -124,6 +124,6 @@ def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
         group['acceleration'] = group['velocity'].diff() / valid_time_diffs
         
         # Radians / second.
-        group['heading_change_rate'] = group['yaw'].diff() / valid_time_diffs
+        #group['heading_change_rate'] = group['yaw'].diff() / valid_time_diffs
 
         return group

@@ -2,6 +2,9 @@ import argparse
 import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
+from example.discretizer.discretizer import AVDiscretizer
+from example.discretizer.discretizer_d1b import AVDiscretizerD1b 
+from example.discretizer.discretizer_d1a import AVDiscretizerD1a
 import pandas as pd
 from example.transition import TransitionRecorded
 
@@ -16,12 +19,24 @@ if __name__ == '__main__':
                         default='csv', choices=['pickle', 'csv', 'gram'])
     parser.add_argument('--verbose', help='Whether to make the Policy Graph code output log statements or not',
                         action='store_true')
+    parser.add_argument('--discretizer', help='Specify the discretizer of the input data.', choices=['d0', 'd1a', 'd1b' ,'d2','d3'], default='d0')
     
-
     args = parser.parse_args()
-    data_folder, data_file, verbose, normalize, output_format = args.input, args.file, args.verbose, args.normalize, args.output
+    data_folder, data_file, verbose, normalize, output_format, discretizer = args.input, args.file, args.verbose, args.normalize, args.output, args.discretizer
 
-    env = SelfDrivingEnvironment()
+    #TODO: update
+    if discretizer == 'd0':
+        discretizer = AVDiscretizer()
+    elif discretizer == 'd1a':
+        discretizer = AVDiscretizerD1a()
+    elif discretizer == 'd1b':
+        discretizer = AVDiscretizerD1b()
+    elif discretizer == 'd2':
+        pass
+    elif discretizer == 'd3':
+        pass
+    
+    env = SelfDrivingEnvironment(discretizer)
 
     # Generate Policy Graph
     #from existing csv file
@@ -40,7 +55,7 @@ if __name__ == '__main__':
         'yaw': 'float64',  
         'velocity': 'float64',
         'acceleration': 'float64',
-        'heading_change_rate': 'float64',
+        #'heading_change_rate': 'float64',
         'delta_local_x': 'float64',
         'delta_local_y': 'float64'
         #'is_destination': 'str'
@@ -71,4 +86,4 @@ if __name__ == '__main__':
     if verbose:
         print(f'Successfully generated Policy Graph with {len(pg.nodes)} nodes and {len(pg.edges)} edges.')
 
-    #python3 generate_pg.py --input /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --normalize --verbose
+    #python3 generate_pg.py --input /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --normalize --verbose --file dataset_v1.0-mini_lidar_0.csv --output csv --discretizer d0

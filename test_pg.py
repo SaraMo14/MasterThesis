@@ -61,6 +61,7 @@ if __name__ == '__main__':
     #for state, metrics in entropy_metrics_graph.items():
     #    print(f"State: {state}, H(s): {metrics['Hs']:.2f}, Ha(s): {metrics['Ha']:.2f}, Hw(s): {metrics['Hw']:.2f}")
 
+    
 
     initial_state = np.array([329.6474941596216, 660.1966888688361, 5.108549775006556, -0.2023862177193762])
     data = {

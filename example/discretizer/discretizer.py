@@ -1,85 +1,16 @@
 from enum import Enum, auto
-
+from example.discretizer.utils import Action, Position, Velocity, Rotation, DetectedObject
 import numpy as np
 from typing import Tuple, Union, Dict
-import ast
 from pgeon.discretizer import Discretizer, Predicate
 
-
-
-class Velocity(Enum):
-  STOPPED = auto()
-  LOW = auto()
-  MEDIUM = auto()
-  HIGH = auto()
-  VERY_HIGH = auto()
-
-  def __str__(self):
-        return f'{self.__class__.__name__}({self.name})'
-
-
-class Rotation(Enum):
-  RIGHT = auto()
-  SLIGHT_RIGHT = auto()
-  FORWARD = auto()
-  SLIGHT_LEFT = auto()
-  LEFT = auto()
-
-  def __str__(self):
-        return f'{self.__class__.__name__}({self.name})'
-
-
-class Position():
-    def __init__(self, x,y):
-        self.x = x
-        self.y = y
-        #self.z = 0
-
-    def __str__(self) -> str:
-        return f'Position({self.x}, {self.y})'
-
-    def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
-
-    def __hash__(self):
-        return hash((self.x, self.y))
-    
-
-class DetectedObjectD1(): #0 or camera_type if any object is present
-    def __init__(self, cam_type=None):
-        self.cam_type = cam_type if cam_type is not None else 0
-
-    def __str__(self) -> str:
-        return f'{self.cam_type}'
-
-    def __eq__(self, other):
-        return self.cam_type == other.cam_type 
-    
-    def __hash__(self):
-        return hash(self.cam_type)
-
-    
-class Action(Enum):
-  IDLE = auto() 
-  TURN_LEFT = auto()
-  TURN_RIGHT = auto()
-  GAS = auto() 
-  BRAKE = auto()
-  REVERSE = auto()
-  STRAIGHT = auto() #car keep going straight at same pace
-  GAS_TURN_RIGHT= auto()
-  GAS_TURN_LEFT= auto()
-  BRAKE_TURN_RIGHT = auto()  
-  BRAKE_TURN_LEFT = auto()
-  #TODO:differentiate between sharp and slight accelaraion, slight turn, ..., lane keeping, preparing to lane change, and lane changing (more of intentations)
-
+# this class is a discretizer for discretizers D0 (no cameras), D1A (generic and with 2 cameras)
 
 class AVDiscretizer(Discretizer):
     def __init__(self):
         super(AVDiscretizer, self).__init__()
 
         self.unique_states: Dict[str, int] = {}
-
         self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] #yaw not needed 
         self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
      
@@ -122,10 +53,9 @@ class AVDiscretizer(Discretizer):
     def discretize_detections(self, detections):
         detected_predicates = []
         for cam_type, objects in detections.items():
-            #print(type(objects))
-            obj = DetectedObjectD1() if objects=="{}" else DetectedObjectD1(cam_type) 
+            obj = DetectedObject() if objects=="{}" else DetectedObject(cam_type) 
             
-            detected_predicates.append(Predicate(DetectedObjectD1, [obj]))
+            detected_predicates.append(Predicate(DetectedObject, [obj]))
         return detected_predicates
 
 
@@ -153,15 +83,6 @@ class AVDiscretizer(Discretizer):
         return Velocity.VERY_HIGH
 
     
-    #def discretize_rotation(self, rotation) -> Rotation:
-    #    for i, threshold in enumerate(self.yaw_thr):
-    #        if rotation <= threshold:  
-    #            return Rotation(i + 1)
-    #    return Rotation.RIGHT  
-
-    #def discretize_acceleration(self, acceleration):
-      #Values Reference: https://pure.tue.nl/ws/portalfiles/portal/50922576/matecconf_aigev2017_01005.pdf
-
 
     def compute_trajectory(self, states):
         """
@@ -174,22 +95,21 @@ class AVDiscretizer(Discretizer):
                 List containing tuples of (current state ID, action ID, next state ID).
         """
         trajectory = []
-        #get camera detected objects
-        self.detection_cameras = [col for col in states.columns if 'detect' in col] #TODO: this should be assigned even when testing the PG (not only when computing the trajectory)
+
+        self.detection_cameras = [col for col in states.columns if 'CAM' in col] #NOTE: this should be assigned even when testing the PG (not only when computing the trajectory)
         
         n_states = len(states)
 
         for i in range(n_states-1):
             
-
             # discretize current state
             current_state_to_discretize = states.iloc[i][self.state_to_be_discretized].tolist()
             current_detection_info = states.iloc[i][self.detection_cameras] if len(self.detection_cameras)>0 else None
             discretized_current_state = self.discretize(current_state_to_discretize, current_detection_info)
             current_state_str = self.state_to_str(discretized_current_state)
             current_state_id = self.add_unique_state(current_state_str)
-
             #check if is scene destination state
+
             current_scene = states.iloc[i]['scene_token']
             next_scene = states.iloc[i+1]['scene_token']
             if current_scene != next_scene:
@@ -215,7 +135,7 @@ class AVDiscretizer(Discretizer):
         last_state_str = self.state_to_str(discretized_last_state)
         last_state_id = self.add_unique_state(last_state_str)
         trajectory.extend([last_state_id, None, None])        
-
+        
         return trajectory
 
 
@@ -285,7 +205,6 @@ class AVDiscretizer(Discretizer):
     def state_to_str(self,
                      state: Tuple[Union[Predicate, ]]
                      ) -> str:
-
         return '&'.join(str(pred) for pred in state)
 
     
@@ -296,12 +215,12 @@ class AVDiscretizer(Discretizer):
         
         mov_predicate = Velocity[vel_str[:-1].split('(')[1]]
         rot_predicate = Rotation[rot_str[:-1].split('(')[1]]
-        print(state_str)
+
         if split_str[4:]:
             detected_predicates = []
             for cam_detections in split_str[3:]:
                 cam_type = cam_detections[:-1].split('(')[1]#map(str.strip, cam_detections[:-2].split(','))
-                detected_predicates.append(Predicate(DetectedObjectD1, [DetectedObjectD1(cam_type)]))
+                detected_predicates.append(Predicate(DetectedObject, [DetectedObject(cam_type)]))
             return (Predicate(Position, [x, y]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]), *detected_predicates)
@@ -330,11 +249,12 @@ class AVDiscretizer(Discretizer):
             if r != og_angle.value:
                 yield og_position, og_velocity, Predicate(Rotation, r), *detections
         
-        for objs in [(DetectedObjectD1('detect_CAM_FRONT'), DetectedObjectD1()),
-             (DetectedObjectD1('detect_CAM_FRONT'), DetectedObjectD1('detect_CAM_BACK')),
-             (DetectedObjectD1(), DetectedObjectD1('detect_CAM_BACK'))]:
-            if objs not in detections:
-                yield og_position, og_velocity, og_angle, Predicate(DetectedObjectD1, [objs[0]]), Predicate(DetectedObjectD1, [objs[1]])
+        if len(detections)>0:
+            for objs in [(DetectedObject('CAM_FRONT'), DetectedObject()),
+                (DetectedObject('CAM_FRONT'), DetectedObject('CAM_BACK')),
+                (DetectedObject(), DetectedObject('CAM_BACK'))]:
+                if objs not in detections:
+                    yield og_position, og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
             
         
 
@@ -349,11 +269,12 @@ class AVDiscretizer(Discretizer):
                         if r != og_angle.value:
                             yield Predicate(Position, [new_x, new_y]), og_velocity, Predicate(Rotation, r), *detections
 
-                    for objs in [(DetectedObjectD1('detect_CAM_FRONT'), DetectedObjectD1()),
-                        (DetectedObjectD1('detect_CAM_FRONT'), DetectedObjectD1('detect_CAM_BACK')),
-                        (DetectedObjectD1(), DetectedObjectD1('detect_CAM_BACK'))]:
-                        if objs not in detections:
-                            yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle, Predicate(DetectedObjectD1, [objs[0]]), Predicate(DetectedObjectD1, [objs[1]])
+                    if len(detections)>0:
+                        for objs in [(DetectedObject('CAM_FRONT'), DetectedObject()),
+                            (DetectedObject('CAM_FRONT'), DetectedObject('CAM_BACK')),
+                            (DetectedObject(), DetectedObject('CAM_BACK'))]:
+                            if objs not in detections:
+                                yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
 
 
 
@@ -364,13 +285,9 @@ class AVDiscretizer(Discretizer):
     def get_predicate_space(self):
         all_tuples = []
 
-        #for p in Position:
-            #for v in Velocity:
-                #for r in Rotation:
-                    #all_tuples.append((p,v,r))
         for v in Velocity:
             for r in Rotation:
-                for cam_type in self.detection_cameras.append(0):
-                    all_tuples.append((v,r, cam_type))
+                ##for cam_type in self.detection_cameras.append(0):
+                    all_tuples.append((v,r))
         return all_tuples
 
