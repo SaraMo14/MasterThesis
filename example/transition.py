@@ -10,12 +10,6 @@ class TransitionRecorded:
         # Structure: {state: {action: {next_state: count}}}
         self.destination_states = set()
 
-    #def record_transition(self, current_state, next_state, action):
-        #self.state_counter[current_state] +=1
-        #if action is not None:
-            #self.transition_counter[current_state][action][next_state] += 1 
-        #else:
-            #self.destination_states.add(current_state)
 
     def calculate_probabilities(self):
         total_states = sum(self.state_counter.values())

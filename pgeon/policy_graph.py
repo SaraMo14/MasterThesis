@@ -1,15 +1,12 @@
 from collections import defaultdict
 from enum import Enum, auto
-from typing import Optional, DefaultDict, Tuple, Any, List, Union, Set
+from typing import Dict, Tuple, Any, List, Union, Set
 import csv
 import pickle
-import random
-import time
 import gymnasium as gym
 import networkx as nx
 import numpy as np
 import tqdm
-
 from pgeon.agent import Agent
 from pgeon.discretizer import Discretizer
 
@@ -27,6 +24,15 @@ class PolicyGraph(nx.MultiDiGraph):
         super().__init__()
         self.environment = environment
         self.discretizer = discretizer
+
+        self.unique_states: Dict[str, int] = {}
+        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] #yaw not needed 
+        self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
+     
+        # Metrics of the original Agent
+        self.agent_metrics = {'AER': [], 'STD': []}
+
+    
 
         self._is_fit = False
         self._trajectories_of_last_fit: List[List[Any]] = []
@@ -241,6 +247,66 @@ class PolicyGraph(nx.MultiDiGraph):
                         self[node][dest_node][action]['frequency'] / total_frequency
 
 
+
+    def compute_trajectory(self, states, verbose = False):
+        """
+            Discretizes a trajectory (list of states) and stores unique states and actions.
+
+            Args:
+                states: DataFrame containing state information for each time step.
+
+            Returns:
+                List containing tuples of (current state ID, action ID, next state ID).
+        """
+        trajectory = []
+
+        self.detection_cameras = [col for col in states.columns if 'CAM' in col] #NOTE: this should be assigned even when testing the PG (not only when computing the trajectory)
+        
+        n_states = len(states)
+
+        rewards = []
+        for i in range(n_states-1):
+            
+            # discretize current state
+            current_state_to_discretize = states.iloc[i][self.state_to_be_discretized].tolist()
+            current_detection_info = states.iloc[i][self.detection_cameras] if len(self.detection_cameras)>0 else None
+            discretized_current_state = self.discretizer.discretize(current_state_to_discretize, current_detection_info)
+            current_state_str = self.discretizer.state_to_str(discretized_current_state)
+            current_state_id = self.add_unique_state(current_state_str)
+            
+            #check if is scene destination state
+            current_scene = states.iloc[i]['scene_token']
+            next_scene = states.iloc[i+1]['scene_token']
+            if current_scene != next_scene:
+                action_id = None
+            else:
+                # Determine action based on the full state information
+                current_state_for_action = states.iloc[i][self.state_columns_for_action].tolist()
+                next_state_for_action = states.iloc[i+1][self.state_columns_for_action].tolist()
+                action = self.discretizer.determine_action(current_state_for_action, next_state_for_action)
+                action_id = self.discretizer.get_action_id(action)
+    
+            if verbose:
+                # From 'predicate', choosing 'act' we achieved state 'predicate_next'
+                print('From', discretized_current_state, ' -> ',action, ' -> ', next_state_for_action)
+
+
+            trajectory.extend([current_state_id, action_id])        
+        
+        #add last state
+        last_state_to_discretize = states.iloc[n_states-1][self.state_to_be_discretized].tolist()
+        last_state_detections = states.iloc[n_states-1][self.detection_cameras] if len(self.detection_cameras)>0 else None
+        discretized_last_state = self.discretizer.discretize(last_state_to_discretize, last_state_detections)
+        last_state_str = self.discretizer.state_to_str(discretized_last_state)
+        last_state_id = self.add_unique_state(last_state_str)
+        trajectory.extend([last_state_id, None, None])        
+        
+        return trajectory
+
+    def add_unique_state(self, state_str: str) -> int:
+        if state_str not in self.unique_states:
+            self.unique_states[state_str] = len(self.unique_states)
+        return self.unique_states[state_str]
 
 
     def test(self, scenes, agent, verbose = False, max_steps = 100):

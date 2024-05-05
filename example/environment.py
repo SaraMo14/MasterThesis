@@ -1,8 +1,8 @@
 from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
-import numpy as np
 from example.discretizer.utils import Velocity, Action, Rotation
 from example.discretizer.discretizer import AVDiscretizer
+from example.agent import SelfDrivingAgent
 from pgeon.discretizer import Predicate
 
 
@@ -18,7 +18,10 @@ class SelfDrivingEnvironment(Environment):
         self.WEIGHT_SMOOTHNESS = 1
         self.WEIGHT_PROGRESS = 1
 
-    # TODO Set seed, introduce randomness
+
+        self.agent = SelfDrivingAgent()
+
+    # TODO Set seed, introduce randomness and fix initialization
     def reset(self, seed: Optional[int] = None) -> Any:
         self.current_state = Predicate(0,0,0,0)
 
@@ -35,15 +38,20 @@ class SelfDrivingEnvironment(Environment):
             next_state: tuple of predicates representing the next state after taking the action.
             reward: 
         """
-         
-        next_state = self.apply_action(action)
+        
+        #update car state
+        next_state = self.agent.act(action)
+        
+        # compute reward
         reward = self.compute_reward(action,is_destination )       
+
+        # check if the episode is done
 
         return next_state, reward, False, None
     
 
     '''
-    def apply_action(self, action: Action):
+    def act(self, action: Action):
         """
         Function that given current state and action returns the next continuous state.
         ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
@@ -84,7 +92,36 @@ class SelfDrivingEnvironment(Environment):
         return np.array(next_state)
     '''
       
-    def compute_reward(self, action, is_destination):
+    def compute_reward(self,action, is_destination):
+        reward = 0
+    
+        # Penalty for exceeding speed limit
+        speed_penalty = min(speed, 10 - speed)
+        reward += speed_penalty
+        
+        # Penalty for steering angle
+        steering_penalty = -0.5 * (steering_angle ** 2)
+        reward += steering_penalty
+    
+        # Penalty for collision
+        if collision:
+            reward -= 10
+        
+        # Penalty for leaving the lane
+        #if distance_to_lane > 2:
+        #    reward -= 1
+        
+        # Encourage reaching the goal quickly
+        reward -= 0.1
+        
+        # Additional reward upon reaching the goal
+        if reached_goal:
+            reward += 10  # Or any positive value to signify reaching the goal
+        
+        return reward
+
+
+    def compute_reward_disc(self, action, is_destination):
         """
         Computes the reward for transitioning from the current_state to next_state via action.
 
@@ -97,7 +134,7 @@ class SelfDrivingEnvironment(Environment):
         Return:
             float: final reward
         """
-
+        #Ref: https://arxiv.org/pdf/2405.01440
         #TODO: penalize progress away from the goal, reward progress toward the goal
         #TODO: rewards between -1,0,1
         # Initialize reward components
@@ -115,7 +152,7 @@ class SelfDrivingEnvironment(Environment):
         # Encourage maintaining a safe and moderate speed
         if velocity in [Velocity.LOW, Velocity.MEDIUM]:
             speed_reward += 0.1
-        elif velocity == [Velocity.HIGH, Velocity.VERY_HIGH]:
+        elif velocity in [Velocity.HIGH, Velocity.VERY_HIGH]:
             speed_reward -= 0.5 # Penalize very high speeds for safety reasons
 
         # Penalize stopping in potentially unsafe or unnecessary situations
@@ -141,7 +178,10 @@ class SelfDrivingEnvironment(Environment):
 
         # To encourage actions that lead to progress towards a goal, give positive reward if current state is a intermediate destination
         if is_destination:
-            progress_reward += 10
+            progress_reward += 0.5
+        else:
+            progress_reward -=0.1
+
 
         
         total_reward = (
@@ -152,5 +192,5 @@ class SelfDrivingEnvironment(Environment):
         )
 
         return total_reward#, speed_reward, safety_reward, smoothness_reward, progress_reward
-        
+        #TODO: add final goal rewad.
 

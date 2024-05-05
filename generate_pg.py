@@ -12,7 +12,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', help='Input data folder of states and actions.', default=".")
     parser.add_argument('--file', help='Input data file name of states and actions.', default="dataset_v1.0-mini_lidar_1.csv")
-    
     parser.add_argument('--normalize', help='Whether the probabilities are stored normalized or not',
                         action='store_true')
     parser.add_argument('--output', help='Which format to output the Policy Graph',

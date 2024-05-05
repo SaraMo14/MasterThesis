@@ -127,3 +127,38 @@ def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
         #group['heading_change_rate'] = group['yaw'].diff() / valid_time_diffs
 
         return group
+
+
+def train_test_split_by_scene(df, test_size=0.2, random_state=42):
+    """
+    Split DataFrame into train and test sets based on scene tokens.
+
+    Parameters:
+        df (pd.DataFrame): DataFrame to be split.
+        test_size (float): Proportion of the dataset to include in the test split (0.0 to 1.0).
+        random_state (int): Seed for random number generation.
+
+    Returns:
+        train_df (pd.DataFrame): Train set.
+        test_df (pd.DataFrame): Test set.
+    """
+    # Get unique scene tokens
+    scene_tokens = df['scene_token'].unique()
+
+    # Randomly shuffle the scene tokens
+    if random_state is not None:
+        np.random.seed(random_state)
+    np.random.shuffle(scene_tokens)
+
+    # Calculate the number of tokens for the test set
+    num_tokens_test = int(len(scene_tokens) * test_size)
+
+    # Split scene tokens into train and test sets
+    test_tokens = scene_tokens[:num_tokens_test]
+    train_tokens = scene_tokens[num_tokens_test:]
+
+    # Filter DataFrame based on train and test tokens
+    train_df = df[df['scene_token'].isin(train_tokens)]
+    test_df = df[df['scene_token'].isin(test_tokens)]
+
+    return train_df, test_df

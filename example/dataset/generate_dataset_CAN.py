@@ -6,7 +6,7 @@ import argparse
 import time
 from pathlib import Path
 import utils
-
+import os
 class NuScenesProcessor:
     def __init__(self, dataroot, version, dataoutput, key_frames=True, sensor="lidar", complexity=0):
         self.dataroot = dataroot
@@ -26,24 +26,6 @@ class NuScenesProcessor:
         elif complexity == 3:
             self.cameras = ['CAM_FRONT', 'CAM_BACK', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT', 'CAM_BACK_RIGHT','CAM_BACK_LEFT' ]
     
-    
-    '''
-    def get_CAN_data(self):
-        all_files = os.listdir(self.nusc_can.can_dir)
-        scene_list = list(np.unique([f[:10] for f in all_files]))
-
-        dataframes = []
-
-        for scene_name in scene_list:
-            steeranglefeedback_df = pd.DataFrame(self.nusc_can.get_messages(scene_name, 'steeranglefeedback', print_warnings=True))
-            steeranglefeedback_df['name'] = scene_name
-
-            dataframes.append(steeranglefeedback_df)
-
-        combined_df = pd.concat(dataframes, ignore_index=True)
-
-        return combined_df
-    '''
     
 
     def cam_detection(self, samples: pd.DataFrame):
@@ -109,8 +91,8 @@ class NuScenesProcessor:
             #TODO: add scenes with no CAN bus data
 
         merged_CAN_df = pd.concat(merged_CAN_data_list, ignore_index=True).drop(columns=['utime', 'name']).rename(columns={'value': 'steering_angle'})
-        output_csv_path = Path(self.dataoutput) / 'can_data.csv'
-        merged_CAN_df.to_csv(output_csv_path, index=False)
+        output_csv_path = Path(self.dataoutput) / 'can_data.parquet'
+        merged_CAN_df.to_parquet(output_csv_path, index=False)
         print(f"Processed CAN data saved to {output_csv_path}")
 
     
@@ -128,7 +110,8 @@ class NuScenesProcessor:
             pd.DataFrame: A DataFrame containing processed scene data with dynamics calculations.
         """
 
-        sample = pd.read_csv(Path(self.dataoutput) / 'can_data.csv')
+        sample = pd.read_parquet(Path(self.dataoutput) / 'can_data.parquet')
+        os.remove(Path(self.dataoutput) / 'can_data.parquet')
 
         # add front camera objects information
         if self.complexity > 0:
@@ -167,16 +150,17 @@ class NuScenesProcessor:
         return final_df
 
 
-    def run_processing(self):
-        self.process_CAN_data() #store file with processed CAN data
+    def run_processing(self, test_size, random_state = 42):
         start = time.time()
-        
+        self.process_CAN_data()
         states = self.process_scene_data()
-        output_csv_path = Path(self.dataoutput) / f'dataset_{self.version}_{self.sensor}_{self.complexity}.csv'
-        states.to_csv(output_csv_path, index=False)
+        train_df, test_df = utils.train_test_split_by_scene(states, test_size, random_state)
         
-        print(f'end: {time.time() - start}')
-        print(f"Processed data saved to {output_csv_path}")
+        train_df.to_csv( Path(self.dataoutput) / f'train_{self.version}_{self.sensor}_{self.complexity}.csv', index=False)
+        test_df.to_csv( Path(self.dataoutput) / f'test_{self.version}_{self.sensor}_{self.complexity}.csv', index=False)
+    
+        print(f'Processing Time: {time.time() - start}')
+        print(f"Processed data saved to {self.dataoutput}")
 
 
 if __name__ == "__main__":
@@ -189,6 +173,7 @@ if __name__ == "__main__":
     parser.add_argument('--key_frames', required=False, type=lambda x: (str(x).lower() == 'true'), default=True, help='Flag to process key frames only (True/False).')
     parser.add_argument('--sensor', required=False, type=str, default="lidar", choices=["lidar", "radar"], help='Specific sensor modality to filter for. Options: "lidar", "radar".')
     parser.add_argument('--complexity', required=True, type=int, default=0, choices=[0,1,2,3], help='Level of complexity of the dataset.')
+    parser.add_argument('--test_size', help='Specify the size of the test set in [0,1].', default=0.2)
 
 
     args = parser.parse_args()
@@ -196,7 +181,7 @@ if __name__ == "__main__":
     #DATAROOT = Path(args.dataroot) #'/data/sets/nuscenes'
 
     processor = NuScenesProcessor( args.dataroot, args.version, args.dataoutput, args.key_frames, args.sensor, args.complexity)
-    processor.run_processing()
+    processor.run_processing(args.test_size)
 
 
 

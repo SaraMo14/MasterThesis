@@ -1,7 +1,7 @@
 from enum import Enum, auto
 from example.discretizer.utils import Action, Position, Velocity, Rotation, DetectedObject
 import numpy as np
-from typing import Tuple, Union, Dict
+from typing import Tuple, Union
 from pgeon.discretizer import Discretizer, Predicate
 
 # this class is a discretizer for discretizers D0 (no cameras), D1A (generic and with 2 cameras)
@@ -10,10 +10,6 @@ class AVDiscretizer(Discretizer):
     def __init__(self):
         super(AVDiscretizer, self).__init__()
 
-        self.unique_states: Dict[str, int] = {}
-        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] #yaw not needed 
-        self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
-     
         self.velocity_thr = [0.2, 6, 11, 17]#m/s while in km/h would be[0, 20, 40, 60] 
         #self.yaw_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
         self.rotation_thr = [-3, -0.3, 0.3 , 3]
@@ -83,7 +79,7 @@ class AVDiscretizer(Discretizer):
         return Velocity.VERY_HIGH
 
     
-
+    '''
     def compute_trajectory(self, states):
         """
             Discretizes a trajectory (list of states) and stores unique states and actions.
@@ -138,7 +134,7 @@ class AVDiscretizer(Discretizer):
         
         return trajectory
 
-
+    '''
 
 
     def determine_action(self, current_state, next_state) -> Action:
@@ -185,10 +181,6 @@ class AVDiscretizer(Discretizer):
         # if no other conditions met
         return Action.IDLE
 
-    def add_unique_state(self, state_str: str) -> int:
-        if state_str not in self.unique_states:
-            self.unique_states[state_str] = len(self.unique_states)
-        return self.unique_states[state_str]
 
     @staticmethod
     def get_action_id(action):
