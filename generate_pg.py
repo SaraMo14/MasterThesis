@@ -3,8 +3,7 @@ import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
 from example.discretizer.discretizer import AVDiscretizer
-from example.discretizer.discretizer_d1b import AVDiscretizerD1b 
-from example.discretizer.discretizer_d1a import AVDiscretizerD1a
+from example.discretizer.discretizer_d1 import AVDiscretizerD1
 import pandas as pd
 from example.transition import TransitionRecorded
 
@@ -18,7 +17,7 @@ if __name__ == '__main__':
                         default='csv', choices=['pickle', 'csv', 'gram'])
     parser.add_argument('--verbose', help='Whether to make the Policy Graph code output log statements or not',
                         action='store_true')
-    parser.add_argument('--discretizer', help='Specify the discretizer of the input data.', choices=['d0', 'd1a', 'd1b' ,'d2','d3'], default='d0')
+    parser.add_argument('--discretizer', help='Specify the discretizer of the input data.', choices=['d0', 'd1' ,'d2','d3'], default='d0')
     
     args = parser.parse_args()
     data_folder, data_file, verbose, normalize, output_format, discretizer = args.input, args.file, args.verbose, args.normalize, args.output, args.discretizer
@@ -26,10 +25,8 @@ if __name__ == '__main__':
     #TODO: update
     if discretizer == 'd0':
         discretizer = AVDiscretizer()
-    elif discretizer == 'd1a':
-        discretizer = AVDiscretizerD1a()
-    elif discretizer == 'd1b':
-        discretizer = AVDiscretizerD1b()
+    elif discretizer == 'd1':
+        discretizer = AVDiscretizerD1()
     elif discretizer == 'd2':
         pass
     elif discretizer == 'd3':
@@ -61,10 +58,13 @@ if __name__ == '__main__':
     }
 
     df = pd.read_csv(Path(data_folder) / data_file, dtype=dtype_dict, parse_dates=['timestamp'])
-    trajectory = env.discretizer.compute_trajectory(df)
+    pg = PG.PolicyGraph(env, env.discretizer)
+    trajectory = pg.compute_trajectory(df, verbose)
+    if verbose:
+        print(f'Scenes rewards: {pg.scenes_rewards}')
     recorder = TransitionRecorded()
     recorder.process_transitions(trajectory)
-    states_df, actions_df  = recorder.create_dataframes(env.discretizer.unique_states)
+    states_df, actions_df  = recorder.create_dataframes(pg.unique_states)
     pg = PG.PolicyGraph.from_data_frame(states_df, actions_df, env, env.discretizer)
 
     

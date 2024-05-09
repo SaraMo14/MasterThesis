@@ -6,7 +6,7 @@ from pgeon.discretizer import Predicate
 
 # this class is a discretizer for discretizer D1a
 
-#Discretizers D1b, D2b, D3b
+#Discretizers D1, D2, D3
 class Detection:
     chunks = ["0", "1-4", "5+"]
 
@@ -49,7 +49,7 @@ class DetectLeft(Detection):
 
 
 
-class AVDiscretizerD1a(AVDiscretizer):
+class AVDiscretizerD1(AVDiscretizer):
     def __init__(self):
         super().__init__()
         self.DETECTION_CLASS_MAPPING = {
@@ -126,8 +126,6 @@ class AVDiscretizerD1a(AVDiscretizer):
 
         x,y = og_position.value
 
-        #1.
-        # Generate nearby positions considering discretization
         for dx in [-2, -1, 0, 1, 2]:
             for dy in [-2, -1, 0, 1, 2]:
                 new_x,new_y = x + dx, y + dy

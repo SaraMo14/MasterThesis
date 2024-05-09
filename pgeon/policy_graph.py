@@ -1,6 +1,6 @@
 from collections import defaultdict
 from enum import Enum, auto
-from typing import Dict, Tuple, Any, List, Union, Set
+from typing import Tuple, Any, List, Union, Set
 import csv
 import pickle
 import gymnasium as gym
@@ -8,7 +8,10 @@ import networkx as nx
 import numpy as np
 import tqdm
 from pgeon.agent import Agent
-from pgeon.discretizer import Discretizer
+from pgeon.discretizer import Predicate, Discretizer
+import time
+import pandas as pd
+from example.discretizer.utils import Action
 
 
 class PolicyGraph(nx.MultiDiGraph):
@@ -25,18 +28,18 @@ class PolicyGraph(nx.MultiDiGraph):
         self.environment = environment
         self.discretizer = discretizer
 
-        self.unique_states: Dict[str, int] = {}
+        #self.unique_states: Dict[str, int] = {}
         self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] #yaw not needed 
         self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
      
-        # Metrics of the original Agent
+        # Metrics of the teacher
         self.agent_metrics = {'AER': [], 'STD': []}
+        
 
     
 
         self._is_fit = False
         self._trajectories_of_last_fit: List[List[Any]] = []
-
 
 
 
@@ -184,29 +187,68 @@ class PolicyGraph(nx.MultiDiGraph):
     ######################
 
     def _run_episode(self,
-                     agent: Agent,
-                     max_steps: int = None,
-                     seed: int = None
+                     scene,
+                     #max_steps: int = 100,
+                     #seed: int = None,
+                     verbose = False
                      ) -> List[Any]:
 
-        observation, _ = self.environment.reset(seed=seed)
-        done = False
-        trajectory = [self.discretizer.discretize(observation)]
+        """
+            Discretizes a trajectory (list of states) and stores unique states and actions.
 
-        step_counter = 0
-        while not done:
-            if max_steps is not None and step_counter >= max_steps:
-                break
+            Args:
+                states: DataFrame containing state information of a scene for each time step.
 
-            action = agent.act(observation)
-            observation, _, done, done2, _ = self.environment.step(action)
-            done = done or done2
+            Returns:
+                List containing tuples of (current state ID, action ID, next state ID).
+        """
+     
+        self.detection_cameras = [col for col in scene.columns if 'CAM' in col] 
+        #NOTE: this should be assigned even when testing the PG (not only when computing the trajectory)
+        
+        trajectory = []
+        tot_reward = 0
+        for i in range(len(scene)-1):
+            
+            # discretize current state
+            current_state_to_discretize = scene.iloc[i][self.state_to_be_discretized].tolist()
+            current_detection_info = scene.iloc[i][self.detection_cameras] if self.detection_cameras else None
+            discretized_current_state = self.discretizer.discretize(current_state_to_discretize, current_detection_info)
+            current_state_str = self.discretizer.state_to_str(discretized_current_state)
+            #current_state_id = self.add_unique_state(current_state_str)
 
-            trajectory.extend([action, self.discretizer.discretize(observation)])
 
-            step_counter += 1
+            current_state_for_action = scene.iloc[i][self.state_columns_for_action].tolist()
+            next_state_for_action = scene.iloc[i+1][self.state_columns_for_action].tolist()
+            action = self.discretizer.determine_action(current_state_for_action, next_state_for_action)
+            action_id = self.discretizer.get_action_id(action)
+   
+            trajectory.extend([current_state_str, action_id])        
 
-        return trajectory
+            #TODO: also consider objects in the reward. Do i need to add reward to last state?
+            reward = self.environment.compute_reward_disc(discretized_current_state, action)
+            tot_reward +=sum(reward)
+
+            if verbose:
+                print('From', discretized_current_state, ' -> ', action)
+                print(f'Rewards: {reward}')
+
+        #add last state
+        last_state_to_discretize = scene.iloc[len(scene)-1][self.state_to_be_discretized].tolist()
+        last_state_detections = scene.iloc[len(scene)-1][self.detection_cameras] if self.detection_cameras else None
+        discretized_last_state = self.discretizer.discretize(last_state_to_discretize, last_state_detections)
+        last_state_str = self.discretizer.state_to_str(discretized_last_state)
+        #last_state_id = self.add_unique_state(last_state_str)
+
+        trajectory.append(last_state_str)        
+        reward = self.environment.compute_reward_disc(discretized_last_state, None)
+        tot_reward +=sum(reward)
+
+        if verbose:
+                print('From', discretized_last_state, ' -> END ')
+                print(f'Rewards: {reward}')
+
+        return trajectory, tot_reward
     
     
     
@@ -218,7 +260,7 @@ class PolicyGraph(nx.MultiDiGraph):
         # Only even numbers are states
         states_in_trajectory = [trajectory[i] for i in range(len(trajectory)) if i % 2 == 0]
         all_new_states_in_trajectory = {state for state in set(states_in_trajectory) if not self.has_node(state)}
-        self.add_nodes_from(all_new_states_in_trajectory, frequency=0)
+        self.add_nodes_from(all_new_states_in_trajectory, frequency=0, is_destination=0)
 
         state_frequencies = {s: states_in_trajectory.count(s) for s in set(states_in_trajectory)}
         for state in state_frequencies:
@@ -231,6 +273,11 @@ class PolicyGraph(nx.MultiDiGraph):
                 self.add_edge(state_from, state_to, key=action, frequency=0, action=action)
             self[state_from][state_to][action]['frequency'] += 1
             pointer += 2
+
+        last_state = states_in_trajectory[-1]
+        if last_state in self.nodes:
+            self.nodes[last_state]['is_destination'] = 1
+
 
     def _normalize(self):
         weights = nx.get_node_attributes(self, 'frequency')
@@ -247,7 +294,55 @@ class PolicyGraph(nx.MultiDiGraph):
                         self[node][dest_node][action]['frequency'] / total_frequency
 
 
+    def fit(self,
+            scenes: pd.DataFrame,
+            update: bool = False,
+            verbose = True
+            ):
 
+        if not update:
+            self.clear()
+            self._trajectories_of_last_fit = []
+            self._is_fit = False
+
+        scene_groups = scenes.groupby('scene_token')
+
+        progress_bar = tqdm.tqdm(total=len(scene_groups), desc='Fitting PG from scenes...')
+
+        progress_bar.set_description('Fitting PG from scenes...')
+
+        start_time = time.time()
+        rewards = []
+
+
+        for scene_token, group in scene_groups:
+            trajectory_result, tot_reward = self._run_episode(group, verbose)
+            self._update_with_trajectory(trajectory_result)
+            self._trajectories_of_last_fit.append(trajectory_result)
+
+            rewards.append(tot_reward)
+            progress_bar.update(1)
+
+            if verbose:
+                print('Final scene reward: ', tot_reward)
+
+        self._normalize()
+        self._is_fit = True
+
+
+        # Compute the average reward and std
+        average_reward = sum(rewards) / scene_groups.ngroups
+        std = np.std(rewards)
+        self.agent_metrics['AER'].append(average_reward)
+        self.agent_metrics['STD'].append(std)
+        self.epoch_mean_time = time.time() - start_time
+        # Compute how much time we spent
+        print(f"Average Reward: {average_reward} and Standard Deviation: {std} --> Epoch Mean Time: {self.epoch_mean_time}")
+
+        return self
+
+
+    '''
     def compute_trajectory(self, states, verbose = False):
         """
             Discretizes a trajectory (list of states) and stores unique states and actions.
@@ -264,12 +359,14 @@ class PolicyGraph(nx.MultiDiGraph):
         
         n_states = len(states)
 
-        rewards = []
+        scenes_rewards = []
+        tot_scene_reward = 0
         for i in range(n_states-1):
-            
+            rewards = 0
+
             # discretize current state
             current_state_to_discretize = states.iloc[i][self.state_to_be_discretized].tolist()
-            current_detection_info = states.iloc[i][self.detection_cameras] if len(self.detection_cameras)>0 else None
+            current_detection_info = states.iloc[i][self.detection_cameras] if self.detection_cameras else None
             discretized_current_state = self.discretizer.discretize(current_state_to_discretize, current_detection_info)
             current_state_str = self.discretizer.state_to_str(discretized_current_state)
             current_state_id = self.add_unique_state(current_state_str)
@@ -278,6 +375,8 @@ class PolicyGraph(nx.MultiDiGraph):
             current_scene = states.iloc[i]['scene_token']
             next_scene = states.iloc[i+1]['scene_token']
             if current_scene != next_scene:
+                scenes_rewards.append(tot_scene_reward)
+                tot_scene_reward = 0
                 action_id = None
             else:
                 # Determine action based on the full state information
@@ -285,22 +384,40 @@ class PolicyGraph(nx.MultiDiGraph):
                 next_state_for_action = states.iloc[i+1][self.state_columns_for_action].tolist()
                 action = self.discretizer.determine_action(current_state_for_action, next_state_for_action)
                 action_id = self.discretizer.get_action_id(action)
-    
+                
+            #TODO: add also objects
+            rewards = self.environment.compute_reward_disc(discretized_current_state, action if action_id is not None else None)
             if verbose:
-                # From 'predicate', choosing 'act' we achieved state 'predicate_next'
-                print('From', discretized_current_state, ' -> ',action, ' -> ', next_state_for_action)
+                print('From', discretized_current_state, ' -> ', action if action_id is not None else 'END')
+                print(f'Rewards: {rewards}')
 
-
+            tot_scene_reward+=sum(rewards)
             trajectory.extend([current_state_id, action_id])        
         
         #add last state
         last_state_to_discretize = states.iloc[n_states-1][self.state_to_be_discretized].tolist()
-        last_state_detections = states.iloc[n_states-1][self.detection_cameras] if len(self.detection_cameras)>0 else None
+        last_state_detections = states.iloc[n_states-1][self.detection_cameras] if self.detection_cameras else None
         discretized_last_state = self.discretizer.discretize(last_state_to_discretize, last_state_detections)
         last_state_str = self.discretizer.state_to_str(discretized_last_state)
         last_state_id = self.add_unique_state(last_state_str)
         trajectory.extend([last_state_id, None, None])        
         
+        rewards = self.environment.compute_reward_disc(discretized_last_state, None)
+        if verbose:
+                print(discretized_last_state, ' -> ', "END")
+                print(f'Rewards: {rewards}')
+
+        tot_scene_reward+=sum(rewards)
+
+        scenes_rewards.append(tot_scene_reward)
+
+        # Compute the average reward and std
+        average_reward = sum(scenes_rewards) / len(scenes_rewards)
+        std = np.std(scenes_rewards)
+
+        self.agent_metrics['AER'].append(average_reward)
+        self.agent_metrics['STD'].append(std)
+
         return trajectory
 
     def add_unique_state(self, state_str: str) -> int:
@@ -308,60 +425,53 @@ class PolicyGraph(nx.MultiDiGraph):
             self.unique_states[state_str] = len(self.unique_states)
         return self.unique_states[state_str]
 
-
-    def test(self, scenes, agent, verbose = False, max_steps = 100):
-        """
-        Tests the PGAgent in the given scenes (episodes).
-
-        Args:
-            scenes: list of (scene_id, scene_start_state, scene_end_state)
-            agent: PolicyBasedAgent
-            verbose:
-                    
-        """
-        print('---------------------------------')
-        print('* START TESTING\n')
-
-        self.pg_metrics['AER'] = []
-        self.pg_metrics['STD'] = []
-
-        #start_time = time.time()
-
-        #rewards = []
-
-        for scene_id, initial_state, final_state in scenes:
-            #self.env.reset()
-            reached_final = False
-            step_count = 0
-            total_reward = 0
-
-            self.current_state = initial_state
-        
-            while step_count < max_steps:
-                action_id, is_destination = agent.act(self.current_state)
-                action = self.discretizer.get_action_from_id(action_id)
-                next_state, reward, _, _ = self.env.step(action, is_destination)
-                total_reward +=reward
-                
-                self.current_state = next_state
-                
-                print(f'step count: {step_count}')
-                step_count +=1
-
-                if next_state == final_state: #TODO: fix
-                    reached_final = True
-                    break
-        
-        # Once we finished the feeding, then we build the Graph
-        print('* END TESTING')
-        print('---------------------------------')
-        print('* RESULTS')
-        #print('\t- Average Reward:', sum(self.pg_metrics['AER']) / len(self.pg_metrics['AER']))
-        #print('\t- Standard Deviation:', sum(self.pg_metrics['STD']) / len(self.pg_metrics['STD']), '\n')
-
-
+    '''
     
-    #TODO:  update
+    
+    '''
+    def _run_episode(self,
+                     agent: Agent,
+                     max_steps: int = 100,
+                     seed: int = None,
+                     verbose = False
+                     ) -> List[Any]:
+
+        """
+        #TODO: Suppose the starts from a random point and does not have a destination. 
+        Check and evaluate the behavior untill the end of the episode.
+        You could compare the trajectory of the real agent (nuscene scenario) and this trajectory.
+        """ 
+        observation = self.environment.reset(seed=seed)
+        done = False
+        trajectory = [self.discretizer.discretize(observation)]
+        if verbose:
+                print('Initial State:', observation)
+        step_counter = 0
+        tot_reward = 0
+        while not done:
+            if step_counter >= max_steps:
+                break
+            
+            action, is_destination = agent.act(observation)
+            observation, reward, _, _ = self.environment.step(action, is_destination)
+            trajectory.extend([action, self.discretizer.discretize(observation)])
+
+            tot_reward +=reward
+            step_counter += 1
+
+            if verbose:
+                    print('Action:', action)
+                    print('Reward:', reward)
+                    print('Map in Next state:\n')
+                    print(observation)
+
+
+        return trajectory, tot_reward
+    '''
+    
+    
+    
+    '''
     def compute_total_reward(self, agent, scenes, max_steps=100):
         """
         Computes the total reward obtained by following a policy from an initial state to a final state.
@@ -398,6 +508,7 @@ class PolicyGraph(nx.MultiDiGraph):
 
         return total_reward, reached_final
         
+        '''
     
 
 
@@ -692,7 +803,8 @@ class PolicyGraph(nx.MultiDiGraph):
             csv_w.writerow(['id', 'value', 'p(s)', 'frequency', 'is_destination'])
             for elem_position, node in enumerate(self.nodes):
                 node_ids[node] = elem_position
-                csv_w.writerow([elem_position, self.discretizer.state_to_str(node),
+                print(type(node))
+                csv_w.writerow([elem_position, node,
                                 self.nodes[node]['probability'], self.nodes[node]['frequency'], self.nodes[node]['is_destination']])
 
         with open(f'{path_edges}{"" if path_to_edges_includes_csv else ".csv"}', 'w+') as f:
@@ -877,11 +989,15 @@ class PGBasedPolicy(Agent):
         
         
         self.pg = policy_graph
+        self.dt=0.5
+        self.wheel_base = 2.588 #in meters. Ref: https://forum.nuscenes.org/t/dimensions-of-the-ego-vehicle-used-to-gather-data/550
+        
         #self.visited_states = set()
         #self.newly_discovered_states = set()
 
 
-
+        # Metrics of the PG Agent
+        self.pg_metrics = {'AER': [], 'STD': []}
         
         assert mode in [PGBasedPolicyMode.GREEDY, PGBasedPolicyMode.STOCHASTIC], \
             'mode must be a member of the PGBasedPolicyMode enum!'
@@ -891,8 +1007,9 @@ class PGBasedPolicy(Agent):
             'node_not_found_mode must be a member of the PGBasedPolicyNodeNotFoundMode enum!'
         self.node_not_found_mode = node_not_found_mode
 
-        self.all_possible_actions = self._get_all_possible_actions()
-
+        self.all_possible_actions = self._get_all_possible_actions()    
+    
+    
     def _get_all_possible_actions(self) -> Set[Any]:
         all_possible_actions = set()
 
@@ -915,25 +1032,7 @@ class PGBasedPolicy(Agent):
                 action_weights[action] += self.pg[predicate][dest_node][action]['probability']
         action_weights = [(a, action_weights[a]) for a in action_weights] #p(a, s)/p(s)
         return action_weights
-
-    '''
-    def _is_predicate_in_pg_and_usable(self, predicate) -> bool:
-        return self.pg.has_node(predicate) and len(self.pg[predicate]) > 0
-
-    def _get_nearest_predicate(self,
-                               predicate, verbose=False
-                               ):
-        nearest_state_generator = self.pg.discretizer.nearest_state(predicate)
-        new_predicate = predicate
-        try:
-            while not self.pg._is_predicate_in_pg_and_usable(new_predicate):
-                new_predicate = next(nearest_state_generator)
-        except StopIteration:
-            print("No nearest states available.")
-            new_predicate = None
-        return new_predicate
-    '''
-
+    
     def _get_action(self,
                     action_weights: List[Tuple[int, float]]
                     ) -> int:
@@ -946,7 +1045,6 @@ class PGBasedPolicy(Agent):
         else:
             raise NotImplementedError
     
-    #TODO: fix how we handle is_destination
     def act_upon_discretized_state(self, predicate):
         is_destination = False
         if self.pg.has_node(predicate) and len(self.pg[predicate]) > 0:
@@ -979,13 +1077,213 @@ class PGBasedPolicy(Agent):
 
         Output:
             Next action, given the input state.
-            is_destination: 1 if input state is a (intermediate) destination state, 0 otherwise
+            is_destination: 1 if input state is or is close to a (intermediate) destination state, 0 otherwise
         '''
+        self.current_state = state
         predicate = self.pg.discretizer.discretize(state)
         return self.act_upon_discretized_state(predicate)
 
 
-   
+
+    def move(self, action: Action):
+        """
+        Function that given current state and action returns the next continuous state.
+        
+        Args:
+            self --> current_state (tuple): (x, y, v, steering_angle) where steering_angle is in radians
+            action: Action taken (e.g., "go straight", "turn", "gas", etc.)
+        
+        Returns:
+        tuple: Updated state (x', y', v', new_steering_angle)
+
+
+        ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
+
+        """
+        #TODO: how will detected objects change their state?
+        x, y, velocity, theta = self.current_state
+       
+        if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):
+            steer_angle = -30
+        if action in (Action.TURN_RIGHT, Action.GAS_TURN_RIGHT,  Action.BRAKE_TURN_RIGHT):
+            steer_angle = +30
+        else:
+            steer_angle = 0
+        
+        steer_angle_rad = np.deg2rad(steer_angle)
+
+        #update velocity
+        if action in (Action.GAS,  Action.GAS_TURN_LEFT,Action.GAS_TURN_RIGHT):
+            velocity += 0.2 #self.discretizer.eps_vel ()
+        elif action in (Action.BRAKE,  Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT):
+            velocity -= 0.2 #self.discretizer.eps_vel ()
+        
+        #update orientation (theta) based on steering angle and velocity
+        new_theta = theta - (velocity / self.wheel_base) * np.tan(steer_angle_rad) * self.dt if action not in [Action.STRAIGHT, Action.GAS, Action.BRAKE] else theta
+
+        # Update position based on velocity and orientation
+        delta_x = velocity * np.cos(new_theta) * self.dt
+        delta_y = velocity * np.sin(new_theta) * self.dt
+
+        # Calculate new position
+        new_x = x + delta_x
+        new_y = y + delta_y
+    
+        return (new_x, new_y, velocity, new_theta)
+    
+
+    def step(self, action:Action, is_destination) -> Tuple[Tuple[Predicate, Predicate, Predicate, Predicate], float, bool, str]:
+        """
+        Perform a step in the environment based on the computation of P(s'|s,a) as #(s,a,s')/(s,a).
+
+        Args:
+            action (Action): Action to be taken.
+            is_destination: True is current state is a (intermediate) destination state, False otherwise
+
+        Returns:
+            next_state: tuple of predicates representing the next state after taking the action.
+            reward: 
+
+        """
+        #update car state
+        next_state = self.move(action)
+        
+
+        # compute reward
+        reward = self.pg.environment.compute_reward(action,is_destination )       
+
+        # check if the episode is done
+        done = False
+        info = None
+
+        return next_state, reward, done, info
+    '''
+    def update_state_tracking(self, state):
+        """
+        Updates the visited and newly discovered states based on the current state.
+        """
+        if state not in self.visited_states:
+            self.newly_discovered_states.add(state)
+        self.visited_states.add(state)
+
+
+    def compute_proportion_of_discovery(self):
+        """
+        Computes the proportion of newly discovered states to total visited states.
+        """
+        if len(self.visited_states) == 0:
+            return 0  # Prevent division by zero
+        return len(self.newly_discovered_states) / len(self.visited_states)
+    '''
+
+    
+    #################
+    # TESTING
+    #################
+
+
+    def test(self, num_episodes, seed, max_steps=20, verbose = False):
+        """
+        Tests the the PGAgent in one scene.
+
+        Args:
+            scenes: list of (scene_id, scene_start_state, scene_end_state)
+            agent: PolicyBasedAgent
+            verbose:
+                    
+        """
+        print('---------------------------------')
+        print('* START TESTING\n')
+        self.pg_metrics['AER'] = []
+        self.pg_metrics['STD'] = []
+
+        start_time = time.time()
+
+        rewards = []
+
+        for episode in range(num_episodes):
+            step_count = 0
+            total_reward = 0
+
+            while step_count < max_steps:
+                    state = self.pg.environment.reset(seed)
+                    action_id, is_destination = self.act(state)
+                    action = self.pg.discretizer.get_action_from_id(action_id)
+                    
+                    next_state, reward, _, _ = self.step(action, is_destination)
+                    
+                    total_reward +=reward
+                    step_count +=1
+
+                    if verbose:
+                        print('Actual state:', state)
+                        print('Action:', action)
+                    
+                    state = next_state
+
+        rewards.append(reward)
+        
+        #self.env.close()
+
+        # Compute the average reward and std
+        average_reward = np.sum(rewards) / num_episodes
+        std = np.std(rewards)
+
+        self.pg_metrics['AER'].append(average_reward)
+        self.pg_metrics['STD'].append(std)
+        self.epoch_mean_time = time.time() - start_time
+        print(f"Average Reward: {average_reward} and Standard Deviation: {std} --> Episode Mean Time: {self.epoch_mean_time}")
+
+
+        print('* END TESTING')
+        print('---------------------------------')
+        print('* RESULTS')
+
+
+    def compare(self):
+        """
+        Compares the metrics of the original RL agent vs the PG Agent.
+        """
+        try:
+            agent_aer = sum(self.pg.agent_metrics['AER']) / len(self.pg.agent_metrics['AER'])
+            agent_std = sum(self.pg.agent_metrics['STD']) / len(self.pg.agent_metrics['STD'])
+
+            mdp_aer = sum(self.pg_metrics['AER']) / len(self.pg_metrics['AER'])
+            mdp_std = sum(self.pg_metrics['STD']) / len(self.pg_metrics['STD'])
+
+            transferred_learning = int((mdp_aer / agent_aer) * 100)
+            diff_aer = -(agent_aer - mdp_aer)
+            diff_std = -(agent_std - mdp_std)
+
+            #percentage_new_states = (self.pg_metrics['new_state']/self.pg_metrics['Visited States'])
+            #percentage_seen_states = (self.pg.number_of_nodes() / self.discretizer.get_num_possible_states())
+
+            #percentage_std = (mdp_std /agent_std)
+
+        except ZeroDivisionError:
+            raise Exception('Agent Metrics are missing! Have you loaded the model?')
+
+        print('---------------------------------')
+        print('* COMPARATIVE')
+        print('\t- Original RL Agent')
+        print('\t\t+ Average Episode Reward:', agent_aer)
+        print('\t\t+ Standard Deviation:', agent_std)
+        print('\t- Policy Graph')
+        print('\t\t+ Average Episode Reward:', mdp_aer)
+        print('\t\t+ Standard Deviation:', mdp_std)
+        #print('\t\t+ Num new states visited:', self.pg_metrics['new_state'])
+        print('\t- Difference')
+        print('\t\t+ Average Episode Reward Diff:', diff_aer)
+        print('\t\t+ Standard Deviation Diff:', diff_std)
+        print('\t- Transferred Learning:', transferred_learning, '%')
+        #print('\t- Percentage New states:', percentage_new_states * 100, '%')
+        #print('\t- Percentage Seen states:', percentage_seen_states * 100, '%')
+        #print('\t- Percentage STD:', percentage_std * 100, '%')
+
+        return (diff_aer,
+                diff_std, transferred_learning)#, percentage_new_states, percentage_seen_states, percentage_std)
+
+    
     """
 
     def get_state_transition(self, current_state, action):

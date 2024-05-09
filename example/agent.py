@@ -1,27 +1,68 @@
 
-from enum import Enum, auto
-from av_discretizer import Action
+from example.discretizer.utils import Action
+import numpy as np
+
 from pgeon.agent import Agent
 
 class SelfDrivingAgent(Agent):
-    def __init__(self, environment ):
+    def __init__(self):
         super(SelfDrivingAgent, self).__init__()
         
-        self.environment = environment
-        self.policy = None #load PG.
+        self.dt=0.5
+        self.wheel_base = 2.588 #in meters. Ref: https://forum.nuscenes.org/t/dimensions-of-the-ego-vehicle-used-to-gather-data/550
+        
+        #self.visited_states = set()
+        #self.newly_discovered_states = set()
 
-        self.visited_states = set()
-        self.newly_discovered_states = set()
 
-    def act(self):
-        # action = self.select_action(current_state)
-        # new_state, reward, done, info = self.environment.step(action)
-        # self.update_state_tracking(new_state)
-        # Additional logic for learning from the transition (current_state, action, reward, new_state)
-        current_state = self.environment.get_current_state()
-        self.update_state_tracking(current_state)       
-        pass
 
+    def move(self, action: Action):
+        """
+        Function that given current state and action returns the next continuous state.
+        
+        Args:
+            self --> current_state (tuple): (x, y, v, steering_angle) where steering_angle is in radians
+            action: Action taken (e.g., "go straight", "turn", "gas", etc.)
+        
+        Returns:
+        tuple: Updated state (x', y', v', new_steering_angle)
+
+
+        ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
+
+        """
+        #TODO: how will detected objects change their state?
+        x, y, velocity, theta = self.current_state
+       
+        if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):
+            steer_angle = -30
+        if action in (Action.TURN_RIGHT, Action.GAS_TURN_RIGHT,  Action.BRAKE_TURN_RIGHT):
+            steer_angle = +30
+        else:
+            steer_angle = 0
+        
+        steer_angle_rad = np.deg2rad(steer_angle)
+
+        #update velocity
+        if action in (Action.GAS,  Action.GAS_TURN_LEFT,Action.GAS_TURN_RIGHT):
+            velocity += 0.2 #self.discretizer.eps_vel ()
+        elif action in (Action.BRAKE,  Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT):
+            velocity -= 0.2 #self.discretizer.eps_vel ()
+        
+        #update orientation (theta) based on steering angle and velocity
+        new_theta = theta - (velocity / self.wheel_base) * np.tan(steer_angle_rad) * self.dt if action not in [Action.STRAIGHT, Action.GAS, Action.BRAKE] else theta
+
+        # Update position based on velocity and orientation
+        delta_x = velocity * np.cos(new_theta) * self.dt
+        delta_y = velocity * np.sin(new_theta) * self.dt
+
+        # Calculate new position
+        new_x = x + delta_x
+        new_y = y + delta_y
+    
+        return (new_x, new_y, velocity, new_theta)
+    
+    
     def update_state_tracking(self, state):
         """
         Updates the visited and newly discovered states based on the current state.
@@ -40,19 +81,3 @@ class SelfDrivingAgent(Agent):
         return len(self.newly_discovered_states) / len(self.visited_states)
 
     
-    #def update_policy(self, state, action, reward, next_state):
-        # Here, the agent would update its policy based on the reward received and the transition
-        # For our simple agent, there's no policy update logic
-        #pass
-
-
-# Example usage:
-# env = SomeEnvironment()
-# agent = Agent(env)
-
-# Simulate agent's exploration process
-# for _ in range(number_of_steps):
-#     agent.act()
-
-# At some point, compute the proportion of discovery
-# print("Proportion of newly discovered states:", agent.compute_proportion_of_discovery())
