@@ -2,8 +2,8 @@ from typing import Optional, Any, Tuple
 from pgeon.environment import Environment
 from example.discretizer.utils import Velocity, Action, Rotation
 #from example.discretizer.discretizer import AVDiscretizer
-from pgeon.discretizer import Predicate
-
+import pandas as pd
+import numpy as np
 
 class SelfDrivingEnvironment(Environment):
 
@@ -19,30 +19,22 @@ class SelfDrivingEnvironment(Environment):
 
 
         self.epsilon = 1e-6 #small pertubation for idle states
+        self.stop_points = set() #list of destinations of scenes
 
-
-    def reset(self, seed: Optional[int] = None) -> Any:
-        #TODO: fix        
-        #np.random.seed(seed)
-        #start_node = np.random.choice(list(self.graph.graph.keys()))
-        #self.current_state = start_node
+    def reset(self, starting_points: pd.DataFrame, seed: Optional[int] = None) -> Any:
+        np.random.seed(seed)
+        start_row = starting_points.sample(n=1)
         
-        x_initial = 329.6474941596216
-        y_initial =  660.1966888688361
-        theta_initial = -0.20238621771937623
-        velocity_initial = 5.108549775006556  
-        return (x_initial, y_initial, velocity_initial,theta_initial)
-   
+        x_initial = start_row['x'].values[0]
+        y_initial = start_row['y'].values[0]
+        theta_initial = start_row['steering_angle'].values[0]
+        velocity_initial = start_row['velocity'].values[0]  
+        
+        print(x_initial, y_initial, velocity_initial, theta_initial)
+        # Assuming you want to return a tuple of the initial values
+        return (x_initial, y_initial, velocity_initial, theta_initial)
 
-
-    def compute_reward(self, action, is_destination):
-        reward = 10
-
-        # check if the episode is done
-        return reward
-
-
-    def compute_reward_disc(self, current_state, action):#, is_destination):
+    def compute_reward(self, current_state, action):#, is_destination):
         """
         Computes the reward for transitioning from the current_state to next_state via action.
 
@@ -99,8 +91,7 @@ class SelfDrivingEnvironment(Environment):
             smoothness_reward +=0.1
 
         # To encourage actions that lead to progress towards a goal, give positive reward if current state is a intermediate destination
-        is_destination = True if action == None else False
-        if is_destination:
+        if current_state in self.stop_points:
             progress_reward += 1
         else:
             progress_reward -=0.1
