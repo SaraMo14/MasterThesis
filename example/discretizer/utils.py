@@ -62,7 +62,7 @@ class Action(Enum):
   TURN_RIGHT = auto()
   GAS = auto() 
   BRAKE = auto()
-  REVERSE = auto()
+  #REVERSE = auto()
   STRAIGHT = auto() #car keep going straight at same pace
   GAS_TURN_RIGHT= auto()
   GAS_TURN_LEFT= auto()

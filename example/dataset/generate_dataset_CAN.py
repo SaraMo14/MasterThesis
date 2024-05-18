@@ -68,7 +68,6 @@ class NuScenesProcessor:
                                             detected_objects[cam_type][key] = 0
                                         detected_objects[cam_type][key] += 1 
 
-
             for cam_type in self.cameras:
                 samples.loc[samples['sample_token'] == sample_token, f'{cam_type}'] = str(detected_objects[cam_type])
 
@@ -76,13 +75,13 @@ class NuScenesProcessor:
 
 
     def process_CAN_data(self):
-        scene = pd.DataFrame(self.nuscenes.scene)[['token', 'name']].rename(columns={'token': 'scene_token'}) #add scene name, useful to merge the CAN BUS data 
+        log_data = pd.DataFrame(self.nuscenes.log)[['token', 'location']].rename(columns={'token': 'log_token'})
+        scene = pd.DataFrame(self.nuscenes.scene)[['token', 'name', 'log_token']].rename(columns={'token': 'scene_token'}) #add scene name, useful to merge the CAN BUS data 
         sample = pd.DataFrame(self.nuscenes.sample)[['token', 'timestamp', 'scene_token']].rename(columns={'token': 'sample_token', 'timestamp': 'utime'}).merge(scene, on='scene_token')
 
-        merged_CAN_data_list = []
-
         valid_scene_names = [name for name in scene['name'] if int(name[-4:]) not in self.nusc_can.can_blacklist]
-
+        merged_CAN_data_list = []
+        
         for scene_name in valid_scene_names:
             steeranglefeedback_df = pd.DataFrame(self.nusc_can.get_messages(scene_name, 'steeranglefeedback', print_warnings=True))
             sample_scene = sample[sample['name'] == scene_name]
@@ -90,7 +89,7 @@ class NuScenesProcessor:
             merged_CAN_data_list.append(sample_CAN_data)
             #TODO: add scenes with no CAN bus data
 
-        merged_CAN_df = pd.concat(merged_CAN_data_list, ignore_index=True).drop(columns=['utime', 'name']).rename(columns={'value': 'steering_angle'})
+        merged_CAN_df = pd.concat(merged_CAN_data_list, ignore_index=True).drop(columns=['utime', 'name']).rename(columns={'value': 'steering_angle'}).merge(log_data, on='log_token' ).drop(columns=['log_token'])
         output_csv_path = Path(self.dataoutput) / 'can_data.parquet'
         merged_CAN_df.to_parquet(output_csv_path, index=False)
         print(f"Processed CAN data saved to {output_csv_path}")
@@ -141,6 +140,7 @@ class NuScenesProcessor:
         # Compute  for each scene, the movement of the agent in local x and y
         final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
 
+
         # mark destination state
         #final_df['is_destination'] = False
         #for scene_token in final_df['scene_token'].unique():
@@ -177,8 +177,6 @@ if __name__ == "__main__":
 
 
     args = parser.parse_args()
-
-    #DATAROOT = Path(args.dataroot) #'/data/sets/nuscenes'
 
     processor = NuScenesProcessor( args.dataroot, args.version, args.dataoutput, args.key_frames, args.sensor, args.complexity)
     processor.run_processing(args.test_size)

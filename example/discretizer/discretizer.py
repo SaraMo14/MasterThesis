@@ -78,64 +78,6 @@ class AVDiscretizer(Discretizer):
                 return Velocity(i + 1)
         return Velocity.VERY_HIGH
 
-    
-    '''
-    def compute_trajectory(self, states):
-        """
-            Discretizes a trajectory (list of states) and stores unique states and actions.
-
-            Args:
-                states: DataFrame containing state information for each time step.
-
-            Returns:
-                List containing tuples of (current state ID, action ID, next state ID).
-        """
-        trajectory = []
-
-        self.detection_cameras = [col for col in states.columns if 'CAM' in col] #NOTE: this should be assigned even when testing the PG (not only when computing the trajectory)
-        
-        n_states = len(states)
-
-        for i in range(n_states-1):
-            
-            # discretize current state
-            current_state_to_discretize = states.iloc[i][self.state_to_be_discretized].tolist()
-            current_detection_info = states.iloc[i][self.detection_cameras] if len(self.detection_cameras)>0 else None
-            discretized_current_state = self.discretize(current_state_to_discretize, current_detection_info)
-            current_state_str = self.state_to_str(discretized_current_state)
-            current_state_id = self.add_unique_state(current_state_str)
-            #check if is scene destination state
-
-            current_scene = states.iloc[i]['scene_token']
-            next_scene = states.iloc[i+1]['scene_token']
-            if current_scene != next_scene:
-                action_id = None
-            else:
-                # Determine action based on the full state information
-                current_state_for_action = states.iloc[i][self.state_columns_for_action].tolist()
-                next_state_for_action = states.iloc[i+1][self.state_columns_for_action].tolist()
-                action = self.determine_action(current_state_for_action, next_state_for_action)
-                action_id = self.get_action_id(action)
-
-                # Debugging print statements
-                #print(f'State {i}: {current_state_for_action}')
-                #print(f'Discretized state: {i} {discretized_current_state}')
-                #print(f'Action: {action}')
-                #print()
-        
-            trajectory.extend([current_state_id, action_id])        
-        #add last state
-        last_state_to_discretize = states.iloc[n_states-1][self.state_to_be_discretized].tolist()
-        last_state_detections = states.iloc[n_states-1][self.detection_cameras] if len(self.detection_cameras)>0 else None
-        discretized_last_state = self.discretize(last_state_to_discretize, last_state_detections)
-        last_state_str = self.state_to_str(discretized_last_state)
-        last_state_id = self.add_unique_state(last_state_str)
-        trajectory.extend([last_state_id, None, None])        
-        
-        return trajectory
-
-    '''
-
 
     def determine_action(self, current_state, next_state) -> Action:
         delta_x0, delta_y0, vel_t,  acc_t0, steer_t0 = current_state
@@ -143,8 +85,8 @@ class AVDiscretizer(Discretizer):
 
         if self.is_close(delta_x1, 0, self.eps_pos_x) and self.is_close(delta_y1, 0, self.eps_pos_y) and self.is_close(vel_t, 0, self.eps_vel):
             return Action.IDLE
-        if delta_y1 < -self.eps_pos_y:
-            return Action.REVERSE
+        #if delta_y1 < -self.eps_pos_y:
+            #return Action.REVERSE
 
         # determine acceleration
         if acc_t1 > self.eps_acc:

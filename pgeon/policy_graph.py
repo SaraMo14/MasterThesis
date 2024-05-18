@@ -12,7 +12,7 @@ from pgeon.discretizer import Predicate, Discretizer
 import time
 import pandas as pd
 from example.discretizer.utils import Action
-
+import math
 
 class PolicyGraph(nx.MultiDiGraph):
 
@@ -29,14 +29,13 @@ class PolicyGraph(nx.MultiDiGraph):
         self.discretizer = discretizer
 
         #self.unique_states: Dict[str, int] = {}
-        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] #yaw not needed 
+        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] 
+        #these columns are used only to determine the action between 2 states in the training scenes 
         self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
      
         # Metrics of the teacher
         self.agent_metrics = {'AER': [], 'STD': []}
         
-
-    
 
         self._is_fit = False
         self._trajectories_of_last_fit: List[List[Any]] = []
@@ -916,7 +915,7 @@ class PolicyGraph(nx.MultiDiGraph):
         Args:
             - scene_data: a policy graph based on a scene
             - gamma:
-            - thetha:
+            - theta:
 
         Improves on the original total policy.
         '''
@@ -1124,12 +1123,74 @@ class PGBasedPolicy(Agent):
             is_destination: 1 if input state is or is close to a (intermediate) destination state, 0 otherwise
         '''
         self.current_state = state
-        predicate = self.pg.discretizer.discretize(state)
+        
+        x, y, speed, _, _, _, steering_angle = self.current_state
+                    
+        predicate = self.pg.discretizer.discretize( (x, y, speed,steering_angle) )
         return self.act_upon_discretized_state(predicate)
 
 
-
     def move(self, action: Action):
+        """
+        Function that given current state and action returns the next continuous state based on physics model.
+        The model assumes rate of changes of speed and yaw are constant.
+        
+        Args:
+            self --> current_state (tuple): (x, y, v, steering_angle) where steering_angle is in radians
+            action: Action taken (e.g., "go straight", "turn", "gas", etc.)
+        
+        Returns:
+        tuple: Updated state (x', y', v', new_steering_angle)
+
+        ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
+
+        """
+        #TODO: how will detected objects change their state?
+
+        x, y, speed, yaw_rate, accel, yaw, steering_angle= self.current_state
+
+        if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):
+            steer = 0.5
+        elif action in (Action.TURN_RIGHT, Action.GAS_TURN_RIGHT,  Action.BRAKE_TURN_RIGHT):
+            steer = -0.5
+        else:
+            steer = 0
+        
+
+        if action in (Action.GAS,  Action.GAS_TURN_LEFT,Action.GAS_TURN_RIGHT):
+            accel += 0.001 #self.discretizer.eps_vel ()
+        elif action in (Action.BRAKE,  Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT):
+            accel -= 0.001 #self.discretizer.eps_vel ()
+        else:
+            accel = 0
+        
+        if action is not Action.IDLE:
+            speed_step = self.dt * accel
+            yaw_step = self.dt * yaw_rate
+            distance_step = self.dt * speed
+        else:
+            speed_step = 0
+            yaw_step = 0
+            distance_step = 0
+
+        # Update state
+        x += distance_step * np.cos(yaw)
+        y += distance_step * np.sin(yaw)
+        speed += speed_step
+
+        yaw += yaw_step
+        
+        yaw_rate+=  np.tan(steering_angle)*speed / self.wheel_base #TODO: fix
+        
+        steering_angle = max(self.min_steer_angle, min(self.max_steer_angle, steering_angle + steer))
+
+        yaw = max(-math.pi, yaw) if yaw<0 else min(math.pi,  yaw)
+
+        return x, y, speed, yaw_rate, accel, yaw, steering_angle
+
+    
+    '''
+    def move_simple(self, action: Action):
         """
         Function that given current state and action returns the next continuous state.
         
@@ -1145,7 +1206,8 @@ class PGBasedPolicy(Agent):
 
         """
         #TODO: how will detected objects change their state?
-        x, y, velocity, theta = self.current_state
+        x, y, velocity, _, _, _, theta = self.current_state
+
        
         if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):
             steer_angle = +0.5
@@ -1174,8 +1236,9 @@ class PGBasedPolicy(Agent):
         new_x = x + delta_x
         new_y = y + delta_y
     
-        return (new_x, new_y, velocity, new_theta)
-    
+        return (new_x, new_y, velocity,  _, _, _, new_theta)
+        
+    '''
 
     def step(self, action:Action) -> Tuple[Tuple[Predicate, Predicate, Predicate, Predicate], float, bool, str]:
         """
@@ -1183,8 +1246,6 @@ class PGBasedPolicy(Agent):
 
         Args:
             action (Action): Action to be taken.
-            is_destination: True is current state is a (intermediate) destination state, False otherwise
-
         Returns:
             next_state: tuple of predicates representing the next state after taking the action.
             reward: 
@@ -1192,12 +1253,14 @@ class PGBasedPolicy(Agent):
         """
         #update car state
         next_state = self.move(action)
-        
 
         # compute reward
+        
         #TODO review
-        curr_state = self.pg.discretizer.discretize(self.current_state)
-        reward = self.pg.environment.compute_reward(curr_state, action )       
+        #predicate = self.pg.discretizer.discretize(self.current_state)
+        x, y, speed, _, _, _, steering_angle = self.current_state   
+        predicate = self.pg.discretizer.discretize( (x, y, speed,steering_angle) )
+        reward = self.pg.environment.compute_reward(predicate, action)       
         # check if the episode is done
         done = False
         info = None
@@ -1227,8 +1290,83 @@ class PGBasedPolicy(Agent):
     # TESTING
     #################
 
+    def test_scene_trajectory(self, ground_truth_traj:list, max_steps=40, verbose = False, render = False):
+        """
+        Tests the the PGAgent in one scene.
 
-    def test(self, num_episodes, seed, data_file, max_steps=40, verbose = False):
+        Args:
+            ground_truth_traj: ground truth trajectory of the agent in a scene.
+            data_file: csv file of states of the vehicle
+            max_steps: number of steps of the episode #TODO: should i provide the destination and make it stop when the destination arrives?
+        """
+        print('---------------------------------')
+        print('* START TESTING\n')
+        self.pg_metrics['AER'] = []
+        self.pg_metrics['STD'] = []
+
+        #start_time = time.time()
+        
+        #load file of states
+        rewards = []
+
+        if render:
+            trajectory = []
+            
+        step_count = 0
+        total_reward = 0
+        state = ground_truth_traj.iloc[0].tolist()#self.pg.environment.reset(ground_truth_traj)
+            
+        while step_count < max_steps:
+                    action_id = self.act(state)
+                    action = self.pg.discretizer.get_action_from_id(action_id)
+                    
+                    next_state, reward, _, _ = self.step(action)
+                    
+                    total_reward +=sum(reward)
+                    step_count +=1                    
+                    
+
+                    if verbose:
+                        print('Actual state:', state)
+                        print('Action:', action)
+                    
+                    if render:
+                        trajectory.append([state[0], state[1]])
+
+                    state = next_state
+
+        rewards.append(reward)
+        
+        # Compute the average reward and std
+        #average_reward = np.sum(rewards) / len(scene_tokens)
+        #std = np.std(rewards)
+
+        #self.pg_metrics['AER'].append(average_reward)
+        #self.pg_metrics['STD'].append(std)
+        #self.epoch_mean_time = time.time() - start_time
+        #print(f"Average Reward: {average_reward} and Standard Deviation: {std} --> Episode Mean Time: {self.epoch_mean_time}")
+
+
+        print('* END TESTING')
+        print('---------------------------------')
+        print('* RESULTS')
+
+        if render:
+            #render PG agent path
+            print('* PG agent path')
+            self.pg.environment.render_egoposes_on_fancy_map(trajectory)
+
+            #render true path
+            print('* True agent path')
+            print(ground_truth_traj)
+            self.pg.environment.render_egoposes_on_fancy_map(ground_truth_traj[['x','y']].values.tolist())
+
+
+
+
+
+
+    def test(self, num_episodes, seed, data_file, max_steps=40, verbose = False, render = False):
         """
         Tests the the PGAgent in one scene.
 
@@ -1250,13 +1388,16 @@ class PGBasedPolicy(Agent):
         starting_points = pd.read_csv(data_file)
         rewards = []
 
-        for episode in range(num_episodes):
+        if render:
+            trajectory = []
+            
+        for i in range(num_episodes):
             step_count = 0
             total_reward = 0
             state = self.pg.environment.reset(starting_points, seed)
             
+            
             while step_count < max_steps:
-                    
                     action_id = self.act(state)
                     action = self.pg.discretizer.get_action_from_id(action_id)
                     
@@ -1264,11 +1405,16 @@ class PGBasedPolicy(Agent):
                     
                     total_reward +=sum(reward)
                     step_count +=1
+                    
+                    
 
                     if verbose:
                         print('Actual state:', state)
                         print('Action:', action)
                     
+                    if render:
+                        trajectory.append([state[0], state[1]])
+
                     state = next_state
 
         rewards.append(reward)
@@ -1288,6 +1434,12 @@ class PGBasedPolicy(Agent):
         print('* END TESTING')
         print('---------------------------------')
         print('* RESULTS')
+
+        if render:
+            self.pg.environment.render_egoposes_on_fancy_map(trajectory)
+
+
+
 
 
     def compare(self):
