@@ -1132,37 +1132,42 @@ class PGBasedPolicy(Agent):
 
     def move(self, action: Action):
         """
-        Function that given current state and action returns the next continuous state based on physics model.
-        The model assumes rate of changes of speed and yaw are constant.
-        
+        Updates the vehicle's state based on the current state and an action, using a simple physics model.
+        The model assumes constant rates of change for speed and yaw.
+
         Args:
-            self --> current_state (tuple): (x, y, v, steering_angle) where steering_angle is in radians
-            action: Action taken (e.g., "go straight", "turn", "gas", etc.)
-        
+            self --> current_state (tuple): (x, y, speed, yaw, steering_angle) 
+                - x: The x-coordinate of the vehicle's position.
+                - y: The y-coordinate of the vehicle's position.
+                - speed: The current speed of the vehicle.
+                - yaw: The current yaw (orientation) of the vehicle in radians.
+                - steering_angle: The current steering angle of the vehicle in radians.
+            action: Action taken (e.g., "go straight", "turn", "gas", etc.). It influences acceleration and steering.
+
         Returns:
-        tuple: Updated state (x', y', v', new_steering_angle)
+            tuple: Updated state (x', y', speed', yaw', steering_angle')
 
         ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
-
         """
+
         #TODO: how will detected objects change their state?
 
         x, y, speed, yaw_rate, accel, yaw, steering_angle= self.current_state
 
+        accel = 0
+        steer = 0
+        
         if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):
             steer = 0.5
-        elif action in (Action.TURN_RIGHT, Action.GAS_TURN_RIGHT,  Action.BRAKE_TURN_RIGHT):
+        elif action in (Action.TURN_RIGHT, Action.GAS_TURN_RIGHT, Action.BRAKE_TURN_RIGHT):
             steer = -0.5
-        else:
-            steer = 0
+        else: 
+            steering_angle = 0
         
-
-        if action in (Action.GAS,  Action.GAS_TURN_LEFT,Action.GAS_TURN_RIGHT):
-            accel += 0.001 #self.discretizer.eps_vel ()
-        elif action in (Action.BRAKE,  Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT):
-            accel -= 0.001 #self.discretizer.eps_vel ()
-        else:
-            accel = 0
+        if action in (Action.GAS, Action.GAS_TURN_LEFT, Action.GAS_TURN_RIGHT):
+            accel += 0.001
+        elif action in (Action.BRAKE, Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT):
+            accel -= 0.001
         
         if action is not Action.IDLE:
             speed_step = self.dt * accel
@@ -1172,21 +1177,29 @@ class PGBasedPolicy(Agent):
             speed_step = 0
             yaw_step = 0
             distance_step = 0
+            speed = 0
 
         # Update state
         x += distance_step * np.cos(yaw)
         y += distance_step * np.sin(yaw)
-        speed += speed_step
+        speed = max(0, speed+speed_step) #ensure is non-negative
 
         yaw += yaw_step
         
-        yaw_rate+=  np.tan(steering_angle)*speed / self.wheel_base #TODO: fix
+        yaw_rate+=0# np.tan(steering_angle)*speed / self.wheel_base #TODO: fix
         
-        steering_angle = max(self.min_steer_angle, min(self.max_steer_angle, steering_angle + steer))
+       
+        steering_angle = max(self.min_steer_angle, min(self.max_steer_angle, steering_angle + steer*self.dt))
 
         yaw = max(-math.pi, yaw) if yaw<0 else min(math.pi,  yaw)
+        
+        # Integrate environment information
+        #self.pg.environment.process_environment()
+        
+        return self.pg.environment.process_environment(x, y, speed, yaw_rate, accel, yaw, steering_angle)#x, y, speed, yaw_rate, accel, yaw, steering_angle
 
-        return x, y, speed, yaw_rate, accel, yaw, steering_angle
+
+    
 
     
     '''

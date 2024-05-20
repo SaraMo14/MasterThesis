@@ -2,7 +2,7 @@ from typing import Optional, Any
 from pgeon.environment import Environment
 from example.discretizer.utils import Velocity, Action, Rotation
 import pandas as pd    
-from nuscenes.map_expansion.map_api import NuScenesMap, NuScenesMapExplorer, NuScenes
+from nuscenes.map_expansion.map_api import NuScenesMap, NuScenesMapExplorer
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -22,6 +22,11 @@ class SelfDrivingEnvironment(Environment):
 
         self.city = city #TODO: distinguish different cities
         self.nusc_map = NuScenesMap(dataroot='/home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes', map_name = city)
+
+
+        self.current_state = None
+        self.threshold_distance = 8 #meters of distance within detecting traffic lights
+        #TODO: change based on velocity, start slowing down before
 
     def reset(self, starting_points: pd.DataFrame, seed: Optional[int] = None) -> Any:
         #np.random.seed(seed)
@@ -109,6 +114,9 @@ class SelfDrivingEnvironment(Environment):
 
     
 
+    #######################
+    ### RENDERING
+    #######################
 
     def render_egoposes_on_fancy_map(self, map_poses:list = [], 
                                      verbose: bool = True,
@@ -166,3 +174,127 @@ class SelfDrivingEnvironment(Environment):
         #return map_poses, fig, ax
 
     
+    ########################
+    ## PROCESS ENVIRONEMNT 
+    ########################
+
+    def process_environment(self, x, y, speed, yaw_rate, accel, yaw, steering_angle):
+        """
+        Processes environmental information to adjust vehicle behavior.
+
+        Args:
+            environment (dict): Information about drivable area, lanes, pedestrian crossings, etc.
+        """
+
+        #check if car is on drivable area, otherwise bring the car to the closest point on closest lane
+        x,y = self.keep_drivable_area(x,y)
+
+        #check if car is near a stop line 
+        if self.is_near_stop_line(x, y):
+            speed, yaw_rate, accel = 0, 0, 0
+        
+        #self.is_near_traffic_light(x,y)
+
+        return x, y, speed, yaw_rate, accel, yaw, steering_angle
+
+
+    def keep_drivable_area(self,x,y):
+        is_lane_area = self.nusc_map.record_on_point(x, y, 'lane') 
+        is_road = self.nusc_map.record_on_point(x, y, 'road_segment')
+        #TODO: exclude road_blocks from road_segment
+        if len(is_lane_area) == 0 and len(is_road)==0:
+            x,y = self.reach_drivable_area(x,y)
+        
+        return x,y
+
+    def is_near_stop_line(self,x,y):
+        '''
+        Function to check if car is near a stop line.
+        Check also if a traffic light is nearby.
+        #TODO: slow down graually when approaching this parts of the environemnt.
+        '''
+        is_stop_line = self.nusc_map.record_on_point(x, y, 'stop_line')
+        if len(is_stop_line)>0:
+
+            return True #TODO: the action keeps the same, so if it was GAS it will keep being gas but with 0,0,0 state values
+        
+        return False
+            
+
+    def is_near_traffic_light(self, x,y):
+        """
+        Check if there is a traffic light nearby the given pose (x, y).
+
+        Args:
+            x (float): Current x-coordinate of the vehicle.
+            y (float): Current y-coordinate of the vehicle.
+
+        Returns:
+            dict: Information about the nearby traffic light (if any), or None.
+        """
+        for traffic_light in self.nusc_map.traffic_light:
+            traffic_light_x = traffic_light['pose']['tx']
+            traffic_light_y = traffic_light['pose']['ty']
+            distance = np.sqrt((x - traffic_light_x)**2 + (y - traffic_light_y)**2)
+            
+            if distance <=self.threshold_distance:
+                return self.get_traffic_light_status(traffic_light)
+        
+        return None
+
+    def apply_brakes(self):
+        # Implement braking logic
+        pass
+
+    def detect_pedestrian_crossing(self, x,y):
+        # Implement logic to detect pedestrian crossings
+        pass
+
+    def steer_to_center_lane(self, lanes):
+        # Implement logic to steer towards the center of the current lane
+        pass
+
+    def avoid_lane_dividers(self, lane_dividers):
+        # Implement logic to avoid lane dividers
+        pass
+
+    def avoid_road_dividers(self, road_dividers):
+        # Implement logic to avoid road dividers
+        pass
+
+   
+
+
+    def reach_drivable_area(self, x,y, radius:float=5, resolution_meters:float = 0.5):
+        """
+        Get closest lane id within a radius of query point. The distance from a point (x, y) to a lane is
+        the minimum l2 distance from (x, y) to a point on the lane.
+        Then, find the closest pose on this lane.
+        Note that this function does not take the heading of the query pose into account.
+        
+        Args:
+            x: X coordinate in global coordinate frame.
+            y: Y Coordinate in global coordinate frame.
+            radius: Radius around point to consider.        
+            resolution_meters:How finely to discretize the lane.
+        Return: 
+            Tuple of the closest pose along the lane
+        """
+
+        lanes = self.nusc_map.get_records_in_radius(x, y, radius, ['lane', 'lane_connector'])
+        lanes = lanes['lane'] + lanes['lane_connector']
+        discrete_points = self.nusc_map.discretize_lanes(lanes, resolution_meters) #returns ID, points for each lane
+
+        current_min = np.inf
+        closest_pose = (None, None)
+        
+        for lane_id, points in discrete_points.items():
+            points_array = np.array(points)
+            distances = np.linalg.norm(points_array[:, :2] - [x, y], axis=1)
+            min_distance = distances.min()
+            if min_distance <=current_min:
+                current_min = min_distance
+                closest_pose_index = distances.argmin()
+                closest_pose = (points_array[closest_pose_index, 0], points_array[closest_pose_index, 1])
+
+        return closest_pose
