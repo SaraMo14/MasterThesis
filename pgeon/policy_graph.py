@@ -336,92 +336,6 @@ class PolicyGraph(nx.MultiDiGraph):
         print(f"Average Reward: {average_reward} and Standard Deviation: {std} --> Epoch Mean Time: {self.epoch_mean_time}")
 
         return self
-
-
-    '''
-    def compute_trajectory(self, states, verbose = False):
-        """
-            Discretizes a trajectory (list of states) and stores unique states and actions.
-
-            Args:
-                states: DataFrame containing state information for each time step.
-
-            Returns:
-                List containing tuples of (current state ID, action ID, next state ID).
-        """
-        trajectory = []
-
-        self.detection_cameras = [col for col in states.columns if 'CAM' in col] #NOTE: this should be assigned even when testing the PG (not only when computing the trajectory)
-        
-        n_states = len(states)
-
-        scenes_rewards = []
-        tot_scene_reward = 0
-        for i in range(n_states-1):
-            rewards = 0
-
-            # discretize current state
-            current_state_to_discretize = states.iloc[i][self.state_to_be_discretized].tolist()
-            current_detection_info = states.iloc[i][self.detection_cameras] if self.detection_cameras else None
-            discretized_current_state = self.discretizer.discretize(current_state_to_discretize, current_detection_info)
-            current_state_str = self.discretizer.state_to_str(discretized_current_state)
-            current_state_id = self.add_unique_state(current_state_str)
-            
-            #check if is scene destination state
-            current_scene = states.iloc[i]['scene_token']
-            next_scene = states.iloc[i+1]['scene_token']
-            if current_scene != next_scene:
-                scenes_rewards.append(tot_scene_reward)
-                tot_scene_reward = 0
-                action_id = None
-            else:
-                # Determine action based on the full state information
-                current_state_for_action = states.iloc[i][self.state_columns_for_action].tolist()
-                next_state_for_action = states.iloc[i+1][self.state_columns_for_action].tolist()
-                action = self.discretizer.determine_action(current_state_for_action, next_state_for_action)
-                action_id = self.discretizer.get_action_id(action)
-                
-            #TODO: add also objects
-            rewards = self.environment.compute_reward_disc(discretized_current_state, action if action_id is not None else None)
-            if verbose:
-                print('From', discretized_current_state, ' -> ', action if action_id is not None else 'END')
-                print(f'Rewards: {rewards}')
-
-            tot_scene_reward+=sum(rewards)
-            trajectory.extend([current_state_id, action_id])        
-        
-        #add last state
-        last_state_to_discretize = states.iloc[n_states-1][self.state_to_be_discretized].tolist()
-        last_state_detections = states.iloc[n_states-1][self.detection_cameras] if self.detection_cameras else None
-        discretized_last_state = self.discretizer.discretize(last_state_to_discretize, last_state_detections)
-        last_state_str = self.discretizer.state_to_str(discretized_last_state)
-        last_state_id = self.add_unique_state(last_state_str)
-        trajectory.extend([last_state_id, None, None])        
-        
-        rewards = self.environment.compute_reward_disc(discretized_last_state, None)
-        if verbose:
-                print(discretized_last_state, ' -> ', "END")
-                print(f'Rewards: {rewards}')
-
-        tot_scene_reward+=sum(rewards)
-
-        scenes_rewards.append(tot_scene_reward)
-
-        # Compute the average reward and std
-        average_reward = sum(scenes_rewards) / len(scenes_rewards)
-        std = np.std(scenes_rewards)
-
-        self.agent_metrics['AER'].append(average_reward)
-        self.agent_metrics['STD'].append(std)
-
-        return trajectory
-
-    def add_unique_state(self, state_str: str) -> int:
-        if state_str not in self.unique_states:
-            self.unique_states[state_str] = len(self.unique_states)
-        return self.unique_states[state_str]
-
-    '''
     
     
     '''
@@ -1044,7 +958,7 @@ class PGBasedPolicy(Agent):
 
 
         # Metrics of the PG Agent
-        self.pg_metrics = {'AER': [], 'STD': []}
+        self.pg_metrics = {'AER': [], 'STD': [], 'ADE': [], 'FDE': []}
         
         assert mode in [PGBasedPolicyMode.GREEDY, PGBasedPolicyMode.STOCHASTIC], \
             'mode must be a member of the PGBasedPolicyMode enum!'
@@ -1303,32 +1217,33 @@ class PGBasedPolicy(Agent):
     # TESTING
     #################
 
-    def test_scene_trajectory(self, ground_truth_traj:list, max_steps=40, verbose = False, render = False):
+    def test_scene_trajectory(self, ground_truth_traj:list, max_steps=20, verbose = False, render = False):
         """
         Tests the the PGAgent in one scene.
 
         Args:
             ground_truth_traj: ground truth trajectory of the agent in a scene.
             data_file: csv file of states of the vehicle
-            max_steps: number of steps of the episode #TODO: should i provide the destination and make it stop when the destination arrives?
+            max_steps: number of steps of the episode
         """
         print('---------------------------------')
-        print('* START TESTING\n')
+        print('* START TESTING')
         self.pg_metrics['AER'] = []
         self.pg_metrics['STD'] = []
 
-        #start_time = time.time()
+        start_time = time.time()
         
-        #load file of states
         rewards = []
 
-        if render:
-            trajectory = []
+        pred_trajectory = []
             
         step_count = 0
         total_reward = 0
         state = ground_truth_traj.iloc[0].tolist()#self.pg.environment.reset(ground_truth_traj)
-            
+        
+        #make sure ground truth and estimated trajectory are of same length
+        ground_truth_traj = ground_truth_traj[:max_steps]
+
         while step_count < max_steps:
                     action_id = self.act(state)
                     action = self.pg.discretizer.get_action_from_id(action_id)
@@ -1338,13 +1253,12 @@ class PGBasedPolicy(Agent):
                     total_reward +=sum(reward)
                     step_count +=1                    
                     
+                    pred_trajectory.append([state[0], state[1]])
 
                     if verbose:
                         print('Actual state:', state)
                         print('Action:', action)
                     
-                    if render:
-                        trajectory.append([state[0], state[1]])
 
                     state = next_state
 
@@ -1359,6 +1273,14 @@ class PGBasedPolicy(Agent):
         #self.epoch_mean_time = time.time() - start_time
         #print(f"Average Reward: {average_reward} and Standard Deviation: {std} --> Episode Mean Time: {self.epoch_mean_time}")
 
+        ADE, FDE = PGBasedPolicy.distance_metrics(np.array(pred_trajectory),ground_truth_traj[['x','y']].to_numpy())
+        self.pg_metrics['ADE'].append(ADE)
+        self.pg_metrics['FDE'].append(FDE)
+        
+        self.epoch_mean_time = time.time() - start_time
+        
+        print(f"ADE: {ADE} and FDE: {FDE} --> Episode Mean Time: {self.epoch_mean_time}")
+
 
         print('* END TESTING')
         print('---------------------------------')
@@ -1367,7 +1289,7 @@ class PGBasedPolicy(Agent):
         if render:
             #render PG agent path
             print('* PG agent path')
-            self.pg.environment.render_egoposes_on_fancy_map(trajectory)
+            self.pg.environment.render_egoposes_on_fancy_map(pred_trajectory)
 
             #render true path
             print('* True agent path')
@@ -1453,6 +1375,26 @@ class PGBasedPolicy(Agent):
 
 
 
+    #######################
+    ### METRICS
+    #######################
+    @staticmethod
+    def distance_metrics(estimated_trajectory, ground_truth):
+        """
+        Compute Average Displacement Error(ADE): average of pointwise L2 distances between the estimated trajectory and ground truth.
+        Compute Final Displacement Error (FDE): the L2 distance between the final points of the estimation and the ground truth.
+
+        estimated_trajectory: np.array of [x,y] values of the estimated trajectory
+        ground_truth: np.array of [x,y] values of the true trajectory
+
+        """
+        ade =  np.mean(np.linalg.norm(estimated_trajectory - ground_truth, axis=1))
+
+        final_gt = ground_truth[-1]
+        final_pred = estimated_trajectory[-1]
+        fde = np.linalg.norm(final_pred-final_gt)
+
+        return ade, fde
 
 
     def compare(self):

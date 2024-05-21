@@ -1,11 +1,13 @@
 from pgeon.policy_graph import PolicyGraph
 from math import log2
 from collections import defaultdict
+import numpy as np
+
 
 class PolicyGraphEvaluator:
     def __init__(self, policy_graph: PolicyGraph):
         self.policy_graph = policy_graph
-
+    
 
     def compute_entropy_metrics(self):
         """
