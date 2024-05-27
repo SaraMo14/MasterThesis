@@ -93,6 +93,7 @@ class PolicyGraph(nx.MultiDiGraph):
                              environment: gym.Env,
                              discretizer: Discretizer):
         pg = PolicyGraph(environment, discretizer)
+        
 
         path_to_nodes_includes_csv = path_nodes[-4:] == '.csv'
         path_to_edges_includes_csv = path_edges[-4:] == '.csv'
@@ -155,7 +156,6 @@ class PolicyGraph(nx.MultiDiGraph):
             for state_id, value, prob, freq in csv_r:
                 state_prob = float(prob)
                 state_freq = int(freq)
-
                 node_info[int(state_id)] = {
                     'value': pg.discretizer.str_to_state(value),
                     'probability': state_prob,
@@ -680,24 +680,42 @@ class PolicyGraph(nx.MultiDiGraph):
     
 
     def question4(self, state, action, verbose=False):
-        #NOTE: We use this metric to double check the reward function and see
-        #whether it satisfies our desires. 
-        #(otherwise, we could use it to answer the above question if we suppose drivers from the scenes are experts ?)
+        """
+        Analyze why the vehicle in state s preferred to take the action a instead of all other possible actions.
 
+        :param state: The current state of the vehicle.
+        :param action: The action taken by the vehicle in the current state.
+        :param verbose: If True, prints detailed information about the differences.
+        :return: A dictionary containing the sum of differences for each other action.
+        """
         if verbose:
             print('***********************************************')
             print('* why the vehicle in state s preferred to take the action a instead of all other possible actions?')
             print('***********************************************')
 
-        reward_difference= self.compute_reward_difference(state, action)
-        for other_action, difference in reward_difference.items():
-            print(f"For {action} compared to {other_action}:")
-            print(f"Speed Reward Difference: {difference[0]}")
-            print(f"Safety Reward Difference: {difference[1]}")
-            print(f"Smoothness Reward Difference: {difference[2]}")
-            print(f"Progress Reward Difference: {difference[3]}")
-            print("-------------------------------------------------------")
+        # Compute reward differences between the given action and all other possible actions
+        reward_difference = self.compute_reward_difference(state, action)
+        sum_of_differences = {}
 
+        for other_action, difference in reward_difference.items():
+            speed_diff = difference[0]
+            safety_diff = difference[1]
+            smoothness_diff = difference[2]
+            progress_diff = difference[3]
+            total_diff = speed_diff + safety_diff + smoothness_diff + progress_diff
+            
+            sum_of_differences[other_action] = total_diff
+
+            if verbose:
+                print(f"For {action} compared to {other_action}:")
+                print(f"Speed Reward Difference: {speed_diff}")
+                print(f"Safety Reward Difference: {safety_diff}")
+                print(f"Smoothness Reward Difference: {smoothness_diff}")
+                print(f"Progress Reward Difference: {progress_diff}")
+                print(f"Total Reward Difference: {total_diff}")
+                print("-------------------------------------------------------")
+                
+        return sum_of_differences
 
         
 
@@ -1301,15 +1319,15 @@ class PGBasedPolicy(Agent):
 
 
 
-    def test(self, num_episodes, seed, data_file, max_steps=40, verbose = False, render = False):
+    def test(self, num_episodes, seed, test_scenes, n_steps=20, verbose = False, plot = False):
         """
-        Tests the the PGAgent in one scene.
+        Tests the the PGAgent on a given number of episodes.
 
         Args:
-            num_episodes: n. of episodes to test
-            seed: number to pseudo-randomly select a row in the data_file
-            data_file: csv file of states of the vehicle
-            max_steps: number of steps of the episode #TODO: should i provide the destination and make it stop when the destination arrives?
+            num_episodes: n. of episodes to test NOTE: make sure that num_episodes<=test_scenes
+            seed: number to pseudo-randomly select a starting point among the possible starts in the data_file
+            test_scenes: csv file of states of the vehicle, for each scene
+            n_steps: number of steps of the episode TODO: should i provide the destination and make it stop when the destination arrives?
                     
         """
         print('---------------------------------')
@@ -1319,20 +1337,18 @@ class PGBasedPolicy(Agent):
 
         start_time = time.time()
         
-        #load file of states
-        starting_points = pd.read_csv(data_file)
         rewards = []
 
-        if render:
-            trajectory = []
             
         for i in range(num_episodes):
             step_count = 0
             total_reward = 0
-            state = self.pg.environment.reset(starting_points, seed)
+            state = self.pg.environment.reset(test_scenes, seed)
             
-            
-            while step_count < max_steps:
+            if plot:
+                trajectory = []
+
+            while step_count < n_steps:
                     action_id = self.act(state)
                     action = self.pg.discretizer.get_action_from_id(action_id)
                     
@@ -1340,19 +1356,21 @@ class PGBasedPolicy(Agent):
                     
                     total_reward +=sum(reward)
                     step_count +=1
-                    
-                    
+                                        
 
                     if verbose:
                         print('Actual state:', state)
                         print('Action:', action)
                     
-                    if render:
+                    if plot:
                         trajectory.append([state[0], state[1]])
 
                     state = next_state
 
-        rewards.append(reward)
+            if plot:
+                self.pg.environment.render_egoposes_on_fancy_map(trajectory)
+
+            rewards.append(reward)
         
         #self.env.close()
 
@@ -1370,9 +1388,7 @@ class PGBasedPolicy(Agent):
         print('---------------------------------')
         print('* RESULTS')
 
-        if render:
-            self.pg.environment.render_egoposes_on_fancy_map(trajectory)
-
+        
 
 
     #######################
@@ -1458,3 +1474,6 @@ class PGBasedPolicy(Agent):
         #TODO:return max value or sample it?
         return max(next_state_distr)
     """
+
+
+#python3 test_pg.py --training_id pg_Call_D0 --test_set test_v1.0-mini_lidar_0.csv --policy-mode greedy --action-mode random --episode 2 --discretizer 0 --city 'b' --verbose 

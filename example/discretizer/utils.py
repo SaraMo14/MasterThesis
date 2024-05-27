@@ -22,21 +22,33 @@ class Rotation(Enum):
         return f'{self.__class__.__name__}({self.name})'
 
 
-class Position():
-    def __init__(self, x,y):
-        self.x = x
-        self.y = y
-        #self.z = 0
+class LanePosition():
+    LEFT = auto()
+    CENTER = auto()
+    RIGHT = auto()
 
-    def __str__(self) -> str:
-        return f'{self.__class__.__name__}({self.x}, {self.y})'
+    def __str__(self):
+            return f'{self.__class__.__name__}({self.name})'
 
-    def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
+class BlockProgress():
+    START = auto()
+    MIDDLE = auto()
+    END = auto()
+    INTERESECTION = auto()
+    NONE = auto()
 
-    def __hash__(self):
-        return hash((self.x, self.y))
-    
+    def __str__(self):
+            return f'{self.__class__.__name__}({self.name})'
+
+
+class NextIntersect(): 
+    #what is my intention at the next intersection? Do i go left, STRAIGH or RIGHT?
+    # This is something that you know being a driver of the vehicle and affects how you're going to drive.
+    # This allows the check for desires.
+    LEFT = auto()
+    STRAIGHT = auto()
+    RIGHT = auto()
+
 #Discretizer D1a
 class DetectedObject(): #0 or camera_type if any object is present
     def __init__(self, cam_type=None):
@@ -54,8 +66,6 @@ class DetectedObject(): #0 or camera_type if any object is present
 
 
 
-
-
 class Action(Enum):
   IDLE = auto() 
   TURN_LEFT = auto()
@@ -69,4 +79,6 @@ class Action(Enum):
   BRAKE_TURN_RIGHT = auto()  
   BRAKE_TURN_LEFT = auto()
   #TODO:differentiate between sharp and slight accelaraion, slight turn, ..., lane keeping, preparing to lane change, and lane changing (more of intentations)
+
+
 

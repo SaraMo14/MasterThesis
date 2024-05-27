@@ -3,48 +3,41 @@ from pgeon.environment import Environment
 from example.discretizer.utils import Velocity, Action, Rotation
 import pandas as pd    
 from nuscenes.map_expansion.map_api import NuScenesMap, NuScenesMapExplorer
+from nuscenes.map_expansion import arcline_path_utils
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 class SelfDrivingEnvironment(Environment):
 
     def __init__(self, city = "boston-seaport"):
         
-        
-        #self.current_state = None
-        #self.discretizer = discretizer
-        self.WEIGHT_SPEED = 1
-        self.WEIGHT_SAFETY = 2
-        self.WEIGHT_SMOOTHNESS = 1
-        self.WEIGHT_PROGRESS = 1
-
         self.stop_points = set() #list of destinations of scenes
 
-        self.city = city #TODO: distinguish different cities
-        self.nusc_map = NuScenesMap(dataroot='/home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes', map_name = city)
+        self.city = city
+        self.nusc_map = NuScenesMap(dataroot='example/dataset/data/sets/nuscenes', map_name = city)
 
 
         self.current_state = None
-        self.threshold_distance = 8 #meters of distance within detecting traffic lights
+        #self.threshold_distance = 8 #meters of distance within detecting traffic lights
         #TODO: change based on velocity, start slowing down before
 
-    def reset(self, starting_points: pd.DataFrame, seed: Optional[int] = None) -> Any:
+    def reset(self, test_scenes: pd.DataFrame, seed = None) -> Any:
+        
         #np.random.seed(seed)
-        #TODO: select randomly from starting scene points 
-        starting_points = starting_points[starting_points['location'] == self.city]
-        start_row = starting_points.sample(n=1)
 
-        x = start_row['x'].values[0]
-        y = start_row['y'].values[0]
-        yaw_rate = start_row['yaw_rate'].values[0]
-        yaw = start_row['yaw'].values[0]
-        accel= start_row['acceleration'].values[0]
-        steering_angle = start_row['steering_angle'].values[0]
-        speed = start_row['velocity'].values[0]  
-        #print('initial state: ',x, y, speed, yaw_rate, accel, yaw, steering_angle)
-        return x, y, speed, yaw_rate, accel, yaw, steering_angle
+        # Randomly select a scene_id
+        unique_scene_ids = test_scenes['scene_token'].unique()
+        selected_scene_id = np.random.choice(unique_scene_ids)
+        
+        # Get the starting point of the selected scene
+        starting_point = test_scenes[test_scenes['scene_token'] == selected_scene_id][['x','y','velocity', 'yaw_rate', 'acceleration', 'yaw', 'steering_angle']].iloc[0].tolist()
 
-    def compute_reward(self, current_state, action):#, is_destination):
+        return starting_point#x, y, speed, yaw_rate, accel, yaw, steering_angle
+
+    
+
+    def compute_reward(self, current_state, action):
         """
         Computes the reward for transitioning from the current_state to next_state via action.
 
@@ -52,17 +45,16 @@ class SelfDrivingEnvironment(Environment):
             current_state: discretized current velocity, position and rotation action,
             action:
             next_state: discretized next velocity, position and rotation action
-            is_destination: True is next_state is a final state, False otherwise.
 
         Return:
-            float: final reward
+            tuple: final reward components Tuple(float)
         
         Ref: https://arxiv.org/pdf/2405.01440
+        Ref: CIRL: controllable imitative reinforcement learning for vision-based self-driving 
         """
-        #TODO: penalize progress away from the goal, reward progress toward the goal
         #TODO: rewards between -1,0,1
         #TODO: add objects
-        # Initialize reward components
+
         speed_reward = 0
         safety_reward = 0
         smoothness_reward = 0
@@ -74,41 +66,67 @@ class SelfDrivingEnvironment(Environment):
         steer_predicate = current_state[2].value[0]
         steer_angle = Rotation[str(steer_predicate)[:-1].split('(')[1]]
 
-        # Encourage maintaining a safe and moderate speed
-        if velocity in [Velocity.LOW, Velocity.MEDIUM]:
-            speed_reward += 0.2
-        elif velocity in [Velocity.HIGH, Velocity.VERY_HIGH]:
-            speed_reward -= 0.2 # Penalize very high speeds for safety reasons
+        # Speed-based reward and penalty
+        if velocity in [Velocity.LOW, Velocity.MEDIUM, Velocity.HIGH]:
+            speed_reward += 50
+        else:  # Velocity.VERY_HIGH
+            speed_reward -= 50  # Penalize very high speeds for safety reasons
+
 
         #TODO: modify to handle nearby objects
         # Penalize stopping in potentially unsafe or unnecessary situations (when car is in the back for example)
         #if velocity == Velocity.STOPPED:
         #    safety_reward -= 0.1
-
         #if object_back and velocity.stopped --> penalize
+        
+        # Collision penalties NOTE: should it be next state or current state?
+        #if self.check_collision(current_state, 'vehicle') or self.check_collision(current_state, 'pedestrian'):
+            #safety_reward -= 100
+        #elif self.check_collision(current_state, 'object'):
+            #safety_reward -= 50
 
-        # Encourage smooth driving: penalize sudden actions that might indicate aggressive driving, or line change
+        # • penalty for steering angles in ranges assumed incorrect for current command (e.g., going left during a turn-right command)
+        if action in [Action.GAS_TURN_LEFT, Action.TURN_LEFT] and steer_angle in [Rotation.RIGHT, Rotation.SLIGHT_RIGHT]:
+            smoothness_reward-=20
+        if action is [Action.GAS_TURN_RIGHT, Action.TURN_RIGHT] and steer_angle in [Rotation.LEFT, Rotation.SLIGHT_LEFT]:
+            smoothness_reward-=20
+
+       
+        # Overlapping with opposite-direction lane penalty or upon leaving the lane (if distance from center of lane is greater than 2)
+        #if self.check_overlap(current_state, 'opposite_lane'):
+            #safety_reward -= 100
+        
+        #if self.check_overlap(current_state, 'sidewalk'):
+            #safety_reward -= 100
+
+
+        if action in [Action.GAS, Action.BRAKE]:
+            smoothness_reward -= 10
+        """
         if action in [Action.TURN_LEFT, Action.TURN_RIGHT, Action.GAS_TURN_LEFT, Action.GAS_TURN_RIGHT, Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT]:
             smoothness_reward -= 0.1
         elif action == Action.STRAIGHT:
-            smoothness_reward += 0.2
-        #Action.GAS, Action.BRAKE
+            smoothness_reward += 0.1
+        elif  action in [Action.GAS, Action.BRAKE]:
+            smoothness_reward += 0.05
+        """
 
-        if steer_angle in [Rotation.LEFT, Rotation.RIGHT]:
-            smoothness_reward -=0.1
-        elif steer_angle in [Rotation.SLIGHT_LEFT, Rotation.SLIGHT_RIGHT]:
-            smoothness_reward -=0.05
+        # Penalty for high-speed turns
+        if velocity in [Velocity.HIGH, Velocity.VERY_HIGH]:
+            if steer_angle in [Rotation.LEFT, Rotation.RIGHT]:
+                smoothness_reward -= 50
+            elif steer_angle in [Rotation.SLIGHT_LEFT, Rotation.SLIGHT_RIGHT]:
+                smoothness_reward -= 20
+            
+        
+        # to encourage actions that lead to progress towards a goal, give positive reward if current state is a intermediate destination
+        if current_state not in self.stop_points:
+            progress_reward += 10
         else:
-            smoothness_reward +=0.1
-
-        # To encourage actions that lead to progress towards a goal, give positive reward if current state is a intermediate destination
-        if current_state in self.stop_points:
-            progress_reward += 1
-        else:
-            progress_reward -=0.1
-
+            progress_reward -=1
+        
         return speed_reward, safety_reward, smoothness_reward, progress_reward
-    
+        
     def step():
         pass
 
@@ -169,7 +187,8 @@ class SelfDrivingEnvironment(Environment):
         plt.axis('off')
 
         #if out_path is not None:
-            #plt.savefig(out_path, bbox_inches='tight', pad_inches=0)
+        plt.savefig(f'example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
 
         #return map_poses, fig, ax
 
@@ -241,6 +260,60 @@ class SelfDrivingEnvironment(Environment):
                 return self.get_traffic_light_status(traffic_light)
         
         return None
+    
+
+    def get_lane_position(self, x,y):
+        """
+        Returns Left, Right or Center based on the car position. Left if on the left lane of the road, RIGHT is right and Center if in the 
+        center.
+
+        """
+        pass
+
+
+
+    def get_lane_block_position(self,x,y, yaw):
+        """
+        Determine which chunk the distance along the lane falls into.
+        The lane is divided into 3 equal chunks.
+        
+        :param distance_along_lane: The distance along the lane.
+        :param total_lane_length: The total length of the lane.
+        
+        :return: The chunk number (1, 2, or 3). 0 for intersection and lane connections and -1 for other cases
+        """
+        #NOTE: Lanes are not always straight. You should account for eventual curvature. 
+        #print('Road objects on selected point:', nusc_map.layers_on_point(x, y), '\n')
+        drivable_area = self.nusc_map.record_on_point(x,y, 'drivable_area')
+        if drivable_area:
+            road_segment_token = self.nusc_map.record_on_point(x,y, 'road_segment')
+            current_lane = self.nusc_map.record_on_point(x,y, 'lane')
+
+            if road_segment_token and self.nusc_map.get('road_segment', road_segment_token)['is_intersection'] and not current_lane:
+                return 0
+            else:
+                #closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)                    
+                lane_record = self.nusc_map.get_arcline_path(current_lane)
+                _, distance_along_lane = arcline_path_utils.project_pose_to_lane((x, y, yaw), lane_record)
+                lane_length = arcline_path_utils.length_of_lane(lane_record)
+
+                        #print(f'current lane: {current_lane}')
+                        #print(f'distance_along_lane {distance_along_lane}')
+                        #print(f'lane length: {lane_length}')
+                        #print()
+
+                chunk_size = lane_length / 3
+
+                if distance_along_lane < chunk_size:
+                    return 1
+                elif distance_along_lane < 2*chunk_size:
+                    return 2
+                else: 
+                    return 3
+
+        else:
+            return -1 #On car parking, walkway, pedestrian crossings
+
 
     def apply_brakes(self):
         # Implement braking logic
@@ -258,11 +331,12 @@ class SelfDrivingEnvironment(Environment):
         # Implement logic to avoid lane dividers
         pass
 
-    def avoid_road_dividers(self, road_dividers):
-        # Implement logic to avoid road dividers
+   
+    # Helper functions to check for collisions and overlaps
+    def check_collision(self, state, object_type):
+        # Implement collision checking logic here
         pass
 
-   
 
 
     def reach_drivable_area(self, x,y, radius:float=5, resolution_meters:float = 0.5):

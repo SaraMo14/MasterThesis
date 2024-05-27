@@ -88,12 +88,12 @@ class AVDiscretizerD1(AVDiscretizer):
 
 
     def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
-        split_str = state_str.split('&')
+        split_str = state_str.split(' ')
         pos_str, vel_str, rot_str = split_str[0:3]
-        x, y = map(int, pos_str[len("Position("):-1].split(','))
+        x, y = map(int, pos_str[len("(Position("):-2].split(','))
         
-        mov_predicate = Velocity[vel_str[:-1].split('(')[1]]
-        rot_predicate = Rotation[rot_str[:-1].split('(')[1]]
+        mov_predicate = Velocity[vel_str[:-2].split('(')[1]]
+        rot_predicate = Rotation[rot_str[:-2].split('(')[1]]
 
         predicates = [
             Predicate(Position, [x, y]),

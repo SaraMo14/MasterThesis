@@ -1,5 +1,6 @@
 from enum import Enum, auto
-from example.discretizer.utils import Action, Position, Velocity, Rotation, DetectedObject
+from example.discretizer.utils import Action, LanePosition, BlockProgress, NextIntersect, Velocity, Rotation, DetectedObject
+from example.environemnt import SelfDrivingEnvironment
 import numpy as np
 from typing import Tuple, Union
 from pgeon.discretizer import Discretizer, Predicate
@@ -7,8 +8,10 @@ from pgeon.discretizer import Discretizer, Predicate
 # this class is a discretizer for discretizers D0 (no cameras), D1A (generic and with 2 cameras)
 
 class AVDiscretizer(Discretizer):
-    def __init__(self):
+    def __init__(self, environment: SelfDrivingEnvironment):
         super(AVDiscretizer, self).__init__()
+
+        self.enviroment = environment
 
         self.velocity_thr = [0.2, 6, 11, 17]#m/s while in km/h would be[0, 20, 40, 60] 
         #self.yaw_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
@@ -31,7 +34,7 @@ class AVDiscretizer(Discretizer):
                    state: np.ndarray, detections=None
                    ) -> Tuple[Predicate, Predicate, Predicate]:
         x, y, velocity, rotation = state 
-        pos_predicate = self.discretize_position((x,y))
+        pos_pred, progress_pred, intersection_pred = self.discretize_position((x,y))
         mov_predicate = self.discretize_speed(velocity)
         rot_predicate = self.discretize_steering_angle(rotation)
         if detections is not None:
@@ -64,13 +67,22 @@ class AVDiscretizer(Discretizer):
 
     def discretize_position(self, position):
         '''
-        Discretizes the position of a point (x, y) into chunks of specified size. The position refers to the position of the LIDAR sensor on top of the vehicle, in the center. '''
+        Discretizes the position of a point (x, y). The position refers to the position of the LIDAR sensor on top of the vehicle, in the center.
+        The results are 3 values of the state derived by the position.
+
+        '''
+            
         x,y = position
+
+
 
         x_chunk_index = int(np.floor(x / self.chunk_size)) #takes larger int <= (x/chunk_size)
         y_chunk_index = int(np.floor(y / self.chunk_size)) 
-        #TODO: caso in cui è in un incrocio
-        return Position(x_chunk_index,y_chunk_index) 
+        #return Position(x_chunk_index,y_chunk_index) 
+
+
+    
+
 
     def discretize_speed(self, speed) -> Velocity:
         for i, threshold in enumerate(self.velocity_thr):
@@ -143,12 +155,12 @@ class AVDiscretizer(Discretizer):
 
     
     def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
-        split_str = state_str.split('&')
+        split_str = state_str.split(' ')
         pos_str, vel_str, rot_str = split_str[0:3]
-        x, y = map(int, pos_str[len("Position("):-1].split(','))
+        x, y = map(int, pos_str[len("(Position("):-2].split(','))
         
-        mov_predicate = Velocity[vel_str[:-1].split('(')[1]]
-        rot_predicate = Rotation[rot_str[:-1].split('(')[1]]
+        mov_predicate = Velocity[vel_str[:-2].split('(')[1]]
+        rot_predicate = Rotation[rot_str[:-2].split('(')[1]]
 
         if split_str[4:]:
             detected_predicates = []
