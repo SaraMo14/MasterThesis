@@ -1,12 +1,15 @@
-from typing import Optional, Any
+from typing import Any
 from pgeon.environment import Environment
-from example.discretizer.utils import Velocity, Action, Rotation
+from example.discretizer.utils import BlockProgress, LanePosition
 import pandas as pd    
 from nuscenes.map_expansion.map_api import NuScenesMap, NuScenesMapExplorer
 from nuscenes.map_expansion import arcline_path_utils
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
+import math
+from example.dataset.utils import create_rotated_rectangle, calculate_direction_of_travel
+from typing import Tuple, List
 
 class SelfDrivingEnvironment(Environment):
 
@@ -16,12 +19,14 @@ class SelfDrivingEnvironment(Environment):
 
         self.city = city
         self.nusc_map = NuScenesMap(dataroot='example/dataset/data/sets/nuscenes', map_name = city)
-
+        self.dividers = getattr(self.nusc_map, 'road_divider') + getattr(self.nusc_map, 'lane_divider')
 
         self.current_state = None
+
         #self.threshold_distance = 8 #meters of distance within detecting traffic lights
         #TODO: change based on velocity, start slowing down before
 
+    
     def reset(self, test_scenes: pd.DataFrame, seed = None) -> Any:
         
         #np.random.seed(seed)
@@ -36,96 +41,6 @@ class SelfDrivingEnvironment(Environment):
         return starting_point#x, y, speed, yaw_rate, accel, yaw, steering_angle
 
     
-
-    def compute_reward(self, current_state, action):
-        """
-        Computes the reward for transitioning from the current_state to next_state via action.
-
-        Args:
-            current_state: discretized current velocity, position and rotation action,
-            action:
-            next_state: discretized next velocity, position and rotation action
-
-        Return:
-            tuple: final reward components Tuple(float)
-        
-        Ref: https://arxiv.org/pdf/2405.01440
-        Ref: CIRL: controllable imitative reinforcement learning for vision-based self-driving 
-        """
-        #TODO: rewards between -1,0,1
-        #TODO: add objects
-
-        speed_reward = 0
-        safety_reward = 0
-        smoothness_reward = 0
-        progress_reward = 0
-
-        
-        vel_predicate = current_state[1].value[0]
-        velocity = Velocity[str(vel_predicate)[:-1].split('(')[1]]
-        steer_predicate = current_state[2].value[0]
-        steer_angle = Rotation[str(steer_predicate)[:-1].split('(')[1]]
-
-        # Speed-based reward and penalty
-        if velocity in [Velocity.LOW, Velocity.MEDIUM, Velocity.HIGH]:
-            speed_reward += 50
-        else:  # Velocity.VERY_HIGH
-            speed_reward -= 50  # Penalize very high speeds for safety reasons
-
-
-        #TODO: modify to handle nearby objects
-        # Penalize stopping in potentially unsafe or unnecessary situations (when car is in the back for example)
-        #if velocity == Velocity.STOPPED:
-        #    safety_reward -= 0.1
-        #if object_back and velocity.stopped --> penalize
-        
-        # Collision penalties NOTE: should it be next state or current state?
-        #if self.check_collision(current_state, 'vehicle') or self.check_collision(current_state, 'pedestrian'):
-            #safety_reward -= 100
-        #elif self.check_collision(current_state, 'object'):
-            #safety_reward -= 50
-
-        # • penalty for steering angles in ranges assumed incorrect for current command (e.g., going left during a turn-right command)
-        if action in [Action.GAS_TURN_LEFT, Action.TURN_LEFT] and steer_angle in [Rotation.RIGHT, Rotation.SLIGHT_RIGHT]:
-            smoothness_reward-=20
-        if action is [Action.GAS_TURN_RIGHT, Action.TURN_RIGHT] and steer_angle in [Rotation.LEFT, Rotation.SLIGHT_LEFT]:
-            smoothness_reward-=20
-
-       
-        # Overlapping with opposite-direction lane penalty or upon leaving the lane (if distance from center of lane is greater than 2)
-        #if self.check_overlap(current_state, 'opposite_lane'):
-            #safety_reward -= 100
-        
-        #if self.check_overlap(current_state, 'sidewalk'):
-            #safety_reward -= 100
-
-
-        if action in [Action.GAS, Action.BRAKE]:
-            smoothness_reward -= 10
-        """
-        if action in [Action.TURN_LEFT, Action.TURN_RIGHT, Action.GAS_TURN_LEFT, Action.GAS_TURN_RIGHT, Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT]:
-            smoothness_reward -= 0.1
-        elif action == Action.STRAIGHT:
-            smoothness_reward += 0.1
-        elif  action in [Action.GAS, Action.BRAKE]:
-            smoothness_reward += 0.05
-        """
-
-        # Penalty for high-speed turns
-        if velocity in [Velocity.HIGH, Velocity.VERY_HIGH]:
-            if steer_angle in [Rotation.LEFT, Rotation.RIGHT]:
-                smoothness_reward -= 50
-            elif steer_angle in [Rotation.SLIGHT_LEFT, Rotation.SLIGHT_RIGHT]:
-                smoothness_reward -= 20
-            
-        
-        # to encourage actions that lead to progress towards a goal, give positive reward if current state is a intermediate destination
-        if current_state not in self.stop_points:
-            progress_reward += 10
-        else:
-            progress_reward -=1
-        
-        return speed_reward, safety_reward, smoothness_reward, progress_reward
         
     def step():
         pass
@@ -187,11 +102,36 @@ class SelfDrivingEnvironment(Environment):
         plt.axis('off')
 
         #if out_path is not None:
-        plt.savefig(f'example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
-        plt.close(fig)
+        #plt.savefig(f'example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
+        #plt.close(fig)
 
         #return map_poses, fig, ax
 
+    def render_ego_on_patch(self,x,y,yaw, patch_size=20, non_geometric_layers:List[str]=['road_divider', 'lane_divider']):
+
+        patch_box = [x,y, patch_size, patch_size]
+        patch = NuScenesMapExplorer.get_patch_coord(patch_box)
+        minx, miny, maxx, maxy = patch.bounds
+        
+        fig, ax = self.nusc_map.render_map_patch( [minx, miny, maxx, maxy], non_geometric_layers, figsize=(5, 5))
+            
+        ax.scatter(x,y)
+        yaw =  math.degrees(-(math.pi / 2) + yaw)
+        rotated_rectangle = create_rotated_rectangle((x,y), yaw, (2,4))
+        x,y = rotated_rectangle.exterior.xy
+        ax.plot(x,y,linewidth=0.2)
+        
+
+        # Plot the heading vector
+        #ax.quiver(x, y, heading_vector[0], heading_vector[1], color='r', scale=5, label='Ego direction')
+
+        # Plot the tangent vector
+        #closest_point = lane_record[closest_pose_idx_to_lane]
+        #ax.quiver(closest_point[0], closest_point[1], tangent_vector[0], tangent_vector[1], color='b', scale=5, label='Lane direction')
+        #ax.legend()
+
+        plt.title('Plot for ego vehicle direction')
+        plt.show()   
     
     ########################
     ## PROCESS ENVIRONEMNT 
@@ -226,19 +166,7 @@ class SelfDrivingEnvironment(Environment):
         
         return x,y
 
-    def is_near_stop_line(self,x,y):
-        '''
-        Function to check if car is near a stop line.
-        Check also if a traffic light is nearby.
-        #TODO: slow down graually when approaching this parts of the environemnt.
-        '''
-        is_stop_line = self.nusc_map.record_on_point(x, y, 'stop_line')
-        if len(is_stop_line)>0:
 
-            return True #TODO: the action keeps the same, so if it was GAS it will keep being gas but with 0,0,0 state values
-        
-        return False
-            
 
     def is_near_traffic_light(self, x,y):
         """
@@ -261,82 +189,6 @@ class SelfDrivingEnvironment(Environment):
         
         return None
     
-
-    def get_lane_position(self, x,y):
-        """
-        Returns Left, Right or Center based on the car position. Left if on the left lane of the road, RIGHT is right and Center if in the 
-        center.
-
-        """
-        pass
-
-
-
-    def get_lane_block_position(self,x,y, yaw):
-        """
-        Determine which chunk the distance along the lane falls into.
-        The lane is divided into 3 equal chunks.
-        
-        :param distance_along_lane: The distance along the lane.
-        :param total_lane_length: The total length of the lane.
-        
-        :return: The chunk number (1, 2, or 3). 0 for intersection and lane connections and -1 for other cases
-        """
-        #NOTE: Lanes are not always straight. You should account for eventual curvature. 
-        #print('Road objects on selected point:', nusc_map.layers_on_point(x, y), '\n')
-        drivable_area = self.nusc_map.record_on_point(x,y, 'drivable_area')
-        if drivable_area:
-            road_segment_token = self.nusc_map.record_on_point(x,y, 'road_segment')
-            current_lane = self.nusc_map.record_on_point(x,y, 'lane')
-
-            if road_segment_token and self.nusc_map.get('road_segment', road_segment_token)['is_intersection'] and not current_lane:
-                return 0
-            else:
-                #closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)                    
-                lane_record = self.nusc_map.get_arcline_path(current_lane)
-                _, distance_along_lane = arcline_path_utils.project_pose_to_lane((x, y, yaw), lane_record)
-                lane_length = arcline_path_utils.length_of_lane(lane_record)
-
-                        #print(f'current lane: {current_lane}')
-                        #print(f'distance_along_lane {distance_along_lane}')
-                        #print(f'lane length: {lane_length}')
-                        #print()
-
-                chunk_size = lane_length / 3
-
-                if distance_along_lane < chunk_size:
-                    return 1
-                elif distance_along_lane < 2*chunk_size:
-                    return 2
-                else: 
-                    return 3
-
-        else:
-            return -1 #On car parking, walkway, pedestrian crossings
-
-
-    def apply_brakes(self):
-        # Implement braking logic
-        pass
-
-    def detect_pedestrian_crossing(self, x,y):
-        # Implement logic to detect pedestrian crossings
-        pass
-
-    def steer_to_center_lane(self, lanes):
-        # Implement logic to steer towards the center of the current lane
-        pass
-
-    def avoid_lane_dividers(self, lane_dividers):
-        # Implement logic to avoid lane dividers
-        pass
-
-   
-    # Helper functions to check for collisions and overlaps
-    def check_collision(self, state, object_type):
-        # Implement collision checking logic here
-        pass
-
 
 
     def reach_drivable_area(self, x,y, radius:float=5, resolution_meters:float = 0.5):
@@ -372,3 +224,242 @@ class SelfDrivingEnvironment(Environment):
                 closest_pose = (points_array[closest_pose_index, 0], points_array[closest_pose_index, 1])
 
         return closest_pose
+    
+
+    def apply_brakes(self):
+        pass
+
+    def detect_pedestrian_crossing(self, x,y):
+        pass
+   
+    def check_collision(self, state, object_type):
+        pass
+
+    #########################
+    #PROCESS LANE INFORMATION
+    #########################
+
+    def is_near_stop_line(self,x,y):
+        '''
+        Function to check if car is near a stop line.
+        Check also if a traffic light is nearby.
+        #TODO: slow down gradually when approaching this parts of the environemnt.
+        '''
+        is_stop_line = self.nusc_map.record_on_point(x, y, 'stop_line')
+        if len(is_stop_line)>0:
+
+            return True #TODO: the action keeps the same, so if it was GAS it will keep being gas but with 0,0,0 state values
+        
+        return False
+    
+       
+    def is_on_divider(self, x,y, yaw, agent_size:Tuple[float, float]) -> bool:
+        """
+        Checks whether the ego vehicle interescts lane and road dividers
+        :param x,y,yaw: coordinates (in meters) and heading (in radians) of the agent 
+        :param agent_size: height and width of the box representing the agent
+        :return: True if agent intersects the layers specified in layer_name
+        """
+        yaw =  math.degrees(-(math.pi / 2) + yaw)
+        
+        # rectangle centered at (x, y) and rotated of yaw angle representing the agent
+        rotated_rectangle = create_rotated_rectangle((x,y), yaw, agent_size)
+
+        for record in self.dividers:
+            line = self.nusc_map.extract_line(record['line_token'])
+            if line.is_empty:  # Skip lines without nodes.
+                continue
+
+            new_line = rotated_rectangle.intersection(line)
+            if not new_line.is_empty:
+                return True
+
+        return False  
+
+    @staticmethod
+    def project_pose_to_lane(pose, lane: List[arcline_path_utils.ArcLinePath], resolution_meters: float = 1):
+        """
+        Find the closest pose on a lane to a query pose and additionally return the
+        distance along the lane for this pose. Note that this function does
+        not take the heading of the query pose into account.
+        :param pose: Query pose in (x,y) coordinates.
+        :param lane: Will find the closest pose on this lane.
+        :param resolution_meters: How finely to discretize the lane.
+        :return: Tuple of the closest pose index and discretized xy points of the line.
+        """
+
+        discretized_lane = arcline_path_utils.discretize_lane(lane, resolution_meters=resolution_meters)
+
+        xy_points = np.array(discretized_lane)[:, :2]
+        closest_pose_index = np.linalg.norm(xy_points - pose[:2], axis=1).argmin()
+        distance_along_lane = closest_pose_index *resolution_meters
+        return closest_pose_index, xy_points, distance_along_lane
+    
+
+
+
+    def get_lane_info(self,x,y, yaw, eps=0.3, agent_size:Tuple[float, float]=(2,4)):
+        """
+        Determines the lane progress (which chunk the distance along the lane falls into). The lane is divided into 3 equal chunks.
+        Determines the lane position (Left if on the left lane of the road, RIGHT is right and Center if in the center.)
+        
+             
+        :return: (BlockProgress, LanePosition)
+        """
+        #NOTE: Lanes are not always straight. You should account for eventual curvature. 
+        #print('Road objects on selected point:', nusc_map.layers_on_point(x, y), '\n')
+
+        drivable_area = self.nusc_map.record_on_point(x,y, 'drivable_area')
+        if not drivable_area:
+            return (BlockProgress.NONE, LanePosition.NONE)
+        
+        road_segment_token = self.nusc_map.record_on_point(x,y, 'road_segment')
+        current_lane = self.nusc_map.record_on_point(x,y, 'lane')
+
+        if road_segment_token and self.nusc_map.get('road_segment', road_segment_token)['is_intersection'] and not current_lane:
+            closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)
+            lane_path = self.nusc_map.get_arcline_path(closest_lane)
+            closest_pose_idx_to_lane, lane_record, _ = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane_path)
+            if closest_pose_idx_to_lane == len(lane_record) - 1:
+                tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+            else:
+                tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+
+            direction_of_travel = calculate_direction_of_travel(tangent_vector, yaw)
+
+            if direction_of_travel <-eps:
+                return(BlockProgress.INTERSECTION, LanePosition.LEFT)
+            elif direction_of_travel>eps:
+                return(BlockProgress.INTERSECTION,LanePosition.RIGHT)
+            else: 
+                return(BlockProgress.INTERSECTION,LanePosition.NONE) #TODO: fix
+        
+        block_progress = None
+        lane_position = None
+                
+        #closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)                    
+        lane = self.nusc_map.get_arcline_path(current_lane)
+        closest_pose_idx_to_lane, lane_record, distance_along_lane = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane)
+
+        #1. Determine Block Progress
+        chunk_size = arcline_path_utils.length_of_lane(lane) / 3
+
+        if distance_along_lane < chunk_size:
+             block_progress = BlockProgress.START 
+        elif distance_along_lane < 2*chunk_size:
+            block_progress = BlockProgress.MIDDLE
+        else: 
+            block_progress =  BlockProgress.END 
+
+
+
+        #2. Determine Lane Position
+        if self.is_on_divider(x,y, yaw, agent_size):
+            lane_position = LanePosition.CENTER
+        else:
+            if closest_pose_idx_to_lane == len(lane_record) - 1:
+                tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+            else:
+                tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+
+            direction_of_travel = calculate_direction_of_travel(tangent_vector, yaw)
+                    
+            if direction_of_travel <-eps:
+                #print("Opposite to travel direction of lane")
+                lane_position = LanePosition.LEFT
+            elif direction_of_travel>eps:
+                #print("In travel direction of lane")
+                lane_position = LanePosition.RIGHT
+            else: 
+                #print("Uncertain direction")
+                lane_position = LanePosition.NONE #TODO: fix
+
+        return (block_progress, lane_position)
+        
+            
+    
+    def render_ego_lane_info():
+
+        pass
+
+    '''
+    def get_direction_of_travel(self, x,y,yaw,  epsilon=0.3):
+        #TODO: hanle intersections and other possible situations
+        #1. compute closest point of arcline_path of current lane
+        current_lane = self.nusc_map.record_on_point(x,y, 'lane')
+        lane= self.nusc_map.get_arcline_path(current_lane)
+
+        closest_pose_idx_to_lane, lane_record = self.project_pose_to_lane((x, y, yaw), lane)
+        
+        #2. compute reference direction vector
+        #create a unit vector pointing in the direction of the lane's travel.ù
+        #You can achieve this by taking two consecutive points from the arcline path and subtracting their positions.
+        # Determine the tangent vector at the closest point
+        if closest_pose_idx_to_lane == len(lane_record)-1 :
+            tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1] 
+        else:
+            tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+
+        
+        #3. NOrmalize vector to get a unit vector
+        # Check if the tangent vector is a zero vector
+        tangent_vector_norm = np.linalg.norm(tangent_vector)
+        if tangent_vector_norm == 0:
+            print("Uncertain direction due to zero tangent vector")
+            return 0
+        
+        reference_direction_unit = tangent_vector / tangent_vector_norm  # Normalize the tangent vector
+
+        #4.compute ego vehicle's heading direction vector
+        heading_vector = np.array([np.cos(yaw), np.sin(yaw)])
+
+
+        #5. compute dot product of there vectors. It ranges from -1 (completely opposite directions) to 1 (identical directions).
+        dot_product = np.dot(reference_direction_unit, heading_vector)
+         #6. Interpret results
+        #A positive dot product (closer to 1) indicates the ego vehicle is aligned with the lane's travel direction.
+        #A negative dot product (closer to -1) indicates the ego vehicle is facing the opposite direction of the lane.
+        #A dot product near zero (-eps, +eps) suggests the vehicle is almost perpendicular to the lane's direction,
+
+        if dot_product > epsilon:
+            print("In travel direction of lane")
+            return 1
+        elif dot_product < -epsilon:
+            print("Opposite to travel direction of lane")
+            return -1
+        else:
+            print("Uncertain direction")
+            return 0 #car perpendicular to the lane
+        '''
+
+    '''
+    def get_lane_position(self, x,y, yaw, agent_size:Tuple[float, float]):
+            """
+            Returns Left, Right or Center based on the car position. 
+            Left if on the left lane of the road, RIGHT is right and Center if in the 
+            center.
+
+            """
+
+            #we suppose drivers stay on the right. 
+            #1. check if has a road divider on the left. If yes: right
+
+            #2. check if has a road divider on the right. If yes: left
+            #3. check if ego vehicle is on road divider. If yes: center
+            #4. right
+
+            if self.is_on_divider(x,y, yaw, agent_size):
+                    return LanePosition.CENTER
+            #elif intersection
+            else:
+                direction = self.get_direction_of_travel(x,y,yaw)
+                if direction>0:
+                    return LanePosition.RIGHT
+                elif direction<0:
+                    return LanePosition.LEFT
+                else:
+                    return None #TODO: handle exceptions
+
+    '''
+    
+    

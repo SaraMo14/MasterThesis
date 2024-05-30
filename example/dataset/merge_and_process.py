@@ -30,6 +30,7 @@ class SceneDataProcessor:
             sample = pd.merge(sample, pd.read_csv(cam_data_path), on='sample_token')
             
         sample_data = pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token', 'calibrated_sensor_token']]
+        
         calibrated_sensors = pd.DataFrame(self.nuscenes.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
         sensors = pd.DataFrame(self.nuscenes.sensor).rename(columns={'token': 'sensor_token'})
         sensors = sensors[sensors['modality'] == self.sensor].merge(calibrated_sensors, on='sensor_token').drop(columns=['rotation', 'translation', 'channel', 'camera_intrinsic', 'sensor_token'])
@@ -38,11 +39,14 @@ class SceneDataProcessor:
         ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
         ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
         merged_df = sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
+        
         merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw).drop(columns=['rotation'])
 
         merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp'], unit='us')
         merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
-        final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics).dropna()
+        
+        final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics)#.dropna()
+        
         final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
         return final_df
 
@@ -70,3 +74,4 @@ if __name__ == "__main__":
     processor = SceneDataProcessor(args.dataroot, args.dataoutput, args.version, args.key_frames, args.sensor, args.complexity)
     processor.run_processing(args.test_size, args.random_state)
 
+#python3 merge_and_process.py --dataroot 'data/sets/nuscenes' --dataoutput 'data/sets/nuscenes/' --version v1.0-trainval --key_frame True --sensor lidar --complexity 0 --test_size 0.2

@@ -1,6 +1,57 @@
 import numpy as np
 from nuscenes.prediction import convert_global_coords_to_local
 import pandas as pd
+from shapely.geometry import Polygon
+from shapely import affinity
+
+
+def calculate_direction_of_travel(tangent_vector, yaw, threshold=0):
+        """
+        Calculate the direction of travel based on the tangent vector of the lane and the vehicle's yaw.
+
+        :param tangent_vector: The tangent vector of the lane at the closest point.
+        :param yaw: The yaw angle of the vehicle in radians.
+        :param eps: A small threshold to determine if the vehicle is perpendicular to the lane.
+        :return: 1 if in travel direction, -1 if opposite, 0 if uncertain.
+        """
+        # Normalize the tangent vector
+        tangent_vector_norm = np.linalg.norm(tangent_vector)
+        if tangent_vector_norm <= threshold: #to account for norms that are very close to zero but not exactly zero.
+            print("Uncertain direction due to zero tangent vector")
+            return 0
+        
+        reference_direction_unit = tangent_vector / tangent_vector_norm
+
+        # Compute the ego vehicle's heading direction vector
+        heading_vector = np.array([np.cos(yaw), np.sin(yaw)])
+
+        # Compute dot product of these vectors
+        dot_product = np.dot(reference_direction_unit, heading_vector)
+
+        return dot_product
+
+def create_rotated_rectangle(center, yaw,size):
+    """
+    Create a rotated rectangle as a Shapely Polygon.
+
+    :param center (tuple): (x, y) coordinates of the rectangle's center.
+    :param yaw (float): Rotation angle in degrees.
+    :param size (tuple): (width, height) of the rectangle's size.
+
+    :return Polygon: A Shapely Polygon representing the rotated rectangle.
+    """
+    x, y = center
+    width, height = size
+
+    rectangle = Polygon([
+        (x - width / 2, y - height / 2),
+        (x + width / 2, y - height / 2),
+        (x + width / 2, y + height / 2),
+        (x - width / 2, y + height / 2)
+    ])
+
+    rotated_rectangle = affinity.rotate(rectangle, yaw, origin='center', use_radians=False)
+    return rotated_rectangle
 
 def velocity(current_translation, prev_translation, time_diff: float) -> float:
     """
@@ -126,6 +177,12 @@ def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
         # Radians / second.
         group['yaw_rate'] = group['yaw'].diff() / valid_time_diffs
 
+        # For the first annotation, replace NaN values with the next valid value
+        group.loc[group.index[0], ['velocity', 'acceleration', 'yaw_rate']] = group.loc[group.index[1], ['velocity', 'acceleration', 'yaw_rate']]
+
+        # For the last annotation, replace NaN values with the previous valid value
+        group.loc[group.index[-1], ['velocity', 'acceleration', 'yaw_rate']] = group.loc[group.index[-2], ['velocity', 'acceleration', 'yaw_rate']]
+        
         return group
 
 

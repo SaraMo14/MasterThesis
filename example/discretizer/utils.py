@@ -22,26 +22,27 @@ class Rotation(Enum):
         return f'{self.__class__.__name__}({self.name})'
 
 
-class LanePosition():
+class LanePosition(Enum):
     LEFT = auto()
     CENTER = auto()
     RIGHT = auto()
-
+    NONE = auto() #for all the cases not includend in the previous categories (e.g car headed perpendicular to the road, parkins, etc..)
+    #TODO: handle intersections    
     def __str__(self):
             return f'{self.__class__.__name__}({self.name})'
 
-class BlockProgress():
+class BlockProgress(Enum):
     START = auto()
     MIDDLE = auto()
     END = auto()
-    INTERESECTION = auto()
-    NONE = auto()
+    INTERSECTION = auto()
+    NONE = auto() #for all the cases not includend in the previous categories (e.g. car parkings, walkway)
 
     def __str__(self):
             return f'{self.__class__.__name__}({self.name})'
 
 
-class NextIntersect(): 
+class NextIntersect(Enum): 
     #what is my intention at the next intersection? Do i go left, STRAIGH or RIGHT?
     # This is something that you know being a driver of the vehicle and affects how you're going to drive.
     # This allows the check for desires.
