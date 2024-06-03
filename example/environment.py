@@ -133,6 +133,50 @@ class SelfDrivingEnvironment(Environment):
         plt.title('Plot for ego vehicle direction')
         plt.show()   
     
+
+
+    def render_rectangle_agent_scene(self, x,y,yaw, agent_size=(2,4)):
+            #render agent as a rectangle and show its heading direction vector compared to the direction of the lane, for each sample in the scene.
+            road_segment_token = self.nusc_map.record_on_point(x,y, 'road_segment')
+            current_lane = self.nusc_map.record_on_point(x,y, 'lane')
+
+            if road_segment_token and self.nusc_map.get('road_segment', road_segment_token)['is_intersection'] and not current_lane:
+                closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)
+                lane_path = self.nusc_map.get_arcline_path(closest_lane)
+                closest_pose_idx_to_lane, lane_record, _ = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane_path)
+                if closest_pose_idx_to_lane == len(lane_record) - 1:
+                    tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+                else:
+                    tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+
+            else:
+
+                lane = self.nusc_map.get_arcline_path(current_lane)
+                closest_pose_idx_to_lane, lane_record, distance_along_lane = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane)
+                if closest_pose_idx_to_lane == len(lane_record) - 1:
+                        tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+                else:
+                    tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+
+    
+              
+            patch_size = 20
+            patch_box = [x,y, patch_size, patch_size]
+            patch = NuScenesMapExplorer.get_patch_coord(patch_box)
+            minx, miny, maxx, maxy = patch.bounds
+
+            fig, ax = self.nusc_map.render_map_patch( [minx, miny, maxx, maxy], ['road_divider', 'lane_divider'], figsize=(5, 5))
+            
+            ax.scatter(x,y)
+            heading_vector = np.array([np.cos(yaw), np.sin(yaw)])
+
+            yaw =  math.degrees(-(math.pi / 2) + yaw)
+            rotated_rectangle = create_rotated_rectangle((x,y), yaw, agent_size)
+            ax.quiver(x, y, heading_vector[0], heading_vector[1], color='b', scale=10, label='Ego Direction')
+            ax.quiver(x,y, tangent_vector[0], tangent_vector[1],  color='r', scale=10, label='Lane Direction')
+            x,y = rotated_rectangle.exterior.xy
+            ax.plot(x,y)
+
     ########################
     ## PROCESS ENVIRONEMNT 
     ########################
@@ -317,22 +361,28 @@ class SelfDrivingEnvironment(Environment):
         current_lane = self.nusc_map.record_on_point(x,y, 'lane')
 
         if road_segment_token and self.nusc_map.get('road_segment', road_segment_token)['is_intersection'] and not current_lane:
-            closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)
-            lane_path = self.nusc_map.get_arcline_path(closest_lane)
-            closest_pose_idx_to_lane, lane_record, _ = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane_path)
-            if closest_pose_idx_to_lane == len(lane_record) - 1:
-                tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+            
+            if self.is_on_divider(x,y, yaw, agent_size):
+                return (BlockProgress.INTERSECTION, LanePosition.CENTER)
             else:
-                tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+                closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)
+                lane_path = self.nusc_map.get_arcline_path(closest_lane)
+                closest_pose_idx_to_lane, lane_record, _ = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane_path)
+                if closest_pose_idx_to_lane == len(lane_record) - 1:
+                    tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+                else:
+                    tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
 
-            direction_of_travel = calculate_direction_of_travel(tangent_vector, yaw)
+                direction_of_travel = calculate_direction_of_travel(tangent_vector, yaw)
 
-            if direction_of_travel <-eps:
-                return(BlockProgress.INTERSECTION, LanePosition.LEFT)
-            elif direction_of_travel>eps:
-                return(BlockProgress.INTERSECTION,LanePosition.RIGHT)
-            else: 
-                return(BlockProgress.INTERSECTION,LanePosition.NONE) #TODO: fix
+                if direction_of_travel <-eps:
+                    return(BlockProgress.INTERSECTION, LanePosition.LEFT)
+                elif direction_of_travel>eps:
+                    return(BlockProgress.INTERSECTION,LanePosition.RIGHT)
+                else:
+                    return(BlockProgress.INTERSECTION,LanePosition.NONE) 
+                    #TODO: fix tangent vector close to zero, meaning 2 points in the asrcline path are very close
+                    #Possible fix: use prev or next points.
         
         block_progress = None
         lane_position = None
@@ -378,9 +428,7 @@ class SelfDrivingEnvironment(Environment):
         
             
     
-    def render_ego_lane_info():
-
-        pass
+    
 
     '''
     def get_direction_of_travel(self, x,y,yaw,  epsilon=0.3):

@@ -1,8 +1,8 @@
-from enum import Enum, auto
-from example.discretizer.utils import Action, LanePosition, BlockProgress, NextIntersect, Velocity, Rotation, DetectedObject
-from example.environemnt import SelfDrivingEnvironment
+from example.dataset.utils import vector_angle
+from example.discretizer.utils import Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation, DetectedObject
+from example.environment import SelfDrivingEnvironment
 import numpy as np
-from typing import Tuple, Union
+from typing import Tuple, List, Union
 from pgeon.discretizer import Discretizer, Predicate
 
 # this class is a discretizer for discretizers D0 (no cameras), D1A (generic and with 2 cameras)
@@ -25,31 +25,44 @@ class AVDiscretizer(Discretizer):
         
         self.frequency = 0.5 #2Hz
         
+        self.agent_size = (2,4)#(1.730, 4.084) #width, length in metres
+
+    
+    
+    
     @staticmethod
     def is_close(a, b, eps=0.1):
         return abs(a - b) <= eps
 
-    
+    ##################################
+    ### DISCRETIZERS
+    ##################################
+
     def discretize(self,
                    state: np.ndarray, detections=None
-                   ) -> Tuple[Predicate, Predicate, Predicate]:
-        x, y, velocity, rotation = state 
-        pos_pred, progress_pred, intersection_pred = self.discretize_position((x,y))
+                   ) -> Tuple[Predicate, ...]:
+        x, y, velocity, steer_angle, yaw = state 
+        block_progress_pred, lane_pos_pred  = self.discretize_position(x,y,yaw)
         mov_predicate = self.discretize_speed(velocity)
-        rot_predicate = self.discretize_steering_angle(rotation)
+        rot_predicate = self.discretize_steering_angle(steer_angle)
+
         if detections is not None:
             detected_predicates = self.discretize_detections(detections)
-            return (Predicate(Position, [pos_predicate.x, pos_predicate.y]),
+            return (Predicate(BlockProgress, [block_progress_pred]),
+                    Predicate(LanePosition, [lane_pos_pred]),
+                    Predicate(NextIntersection, [NextIntersection.NONE]),
                 Predicate(Velocity, [mov_predicate]),
                 Predicate(Rotation, [rot_predicate]),
                 *detected_predicates)
         else:
-            return (Predicate(Position, [pos_predicate.x, pos_predicate.y]),
+            return (Predicate(BlockProgress, [block_progress_pred]),
+                    Predicate(LanePosition, [lane_pos_pred]),
+                    Predicate(NextIntersection, [NextIntersection.NONE]),
                 Predicate(Velocity, [mov_predicate]),
                 Predicate(Rotation, [rot_predicate]))
         
 
-    def discretize_detections(self, detections):
+    def discretize_detections(self, detections)-> List:
         detected_predicates = []
         for cam_type, objects in detections.items():
             obj = DetectedObject() if objects=="{}" else DetectedObject(cam_type) 
@@ -58,29 +71,18 @@ class AVDiscretizer(Discretizer):
         return detected_predicates
 
 
-    def discretize_steering_angle(self, steering_angle: float):
+    def discretize_steering_angle(self, steering_angle: float)->Rotation:
         for i, threshold in enumerate(self.rotation_thr):
             if steering_angle <= threshold:  
                 return Rotation(i + 1)
         return Rotation.LEFT  
 
 
-    def discretize_position(self, position):
-        '''
-        Discretizes the position of a point (x, y). The position refers to the position of the LIDAR sensor on top of the vehicle, in the center.
-        The results are 3 values of the state derived by the position.
+    def discretize_position(self, x,y,yaw)-> Tuple[BlockProgress,LanePosition]:
 
-        '''
-            
-        x,y = position
-
-
-
-        x_chunk_index = int(np.floor(x / self.chunk_size)) #takes larger int <= (x/chunk_size)
-        y_chunk_index = int(np.floor(y / self.chunk_size)) 
-        #return Position(x_chunk_index,y_chunk_index) 
-
-
+        block_progress, lane_position = self.enviroment.get_lane_info(x,y, yaw, eps=0.3, agent_size=self.agent_size)
+        
+        return block_progress, lane_position
     
 
 
@@ -89,6 +91,70 @@ class AVDiscretizer(Discretizer):
             if speed <= threshold: 
                 return Velocity(i + 1)
         return Velocity.VERY_HIGH
+    
+    
+        
+    def assign_intersection_actions(trajectory, intersection_info):
+        """
+        Assigns actions based on intersection information.
+
+        Args:
+            trajectory: List containing the discretized trajectory.
+            intersection_info: List storing information about intersections.
+
+        Returns:
+            Updated trajectory with assigned actions for intersections.
+        """
+        for i in range(0, len(trajectory), 2):  # Access states
+            if trajectory[i][0] == Predicate(BlockProgress, BlockProgress.INTERSECTION):
+                print(f'frame {i/2} --> {trajectory[i]}')
+                continue
+
+            for idx, action in intersection_info:
+                if 2 * idx > i and 2 * idx < len(trajectory) - 1:
+                    state = list(trajectory[i])
+                    state[2] = action
+                    trajectory[i] = tuple(state)
+                    break
+            print(f'frame {i/2} --> {trajectory[i]}')
+        return trajectory
+    
+
+    @staticmethod
+    def determine_intersection_action(start_position, end_position) -> NextIntersection:
+        """
+        Determine the action at the intersection based on positional changes.
+        
+        Args:
+            start_position (x,y,x1,y1): vector containing starting position just before the intersection and at the beginning of the intersection.
+            end_position (x,y,x1,y1): vector containin position at the intersection and just after the intersection.
+        Returns:
+            Action: NextIntersection.RIGHT, NextIntersection.LEFT, or NextIntersection.STRAIGHT.
+        """
+
+
+        x_1,y_1, x_2, y_2 = start_position
+        x_n,y_n, x_n1, y_n1 = end_position
+
+        #Calculate the movement vector from point (x1, y1) to point (x2, y2)
+        pre_vector = np.array([x_2 - x_1, y_2 - y_1]) 
+        post_vector = np.array([x_n1 - x_n, y_n1 - y_n]) 
+        angle = vector_angle(pre_vector, post_vector)
+
+        #Determine action based on the angle
+        if abs(angle) < np.radians(30):
+            return Predicate(NextIntersection,[NextIntersection.STRAIGHT])
+        elif np.cross(pre_vector, post_vector) > 0:
+            return Predicate(NextIntersection,[NextIntersection.LEFT])
+        else:
+            return Predicate(NextIntersection,[NextIntersection.RIGHT])
+
+
+
+    ##################################
+    
+
+
 
 
     def determine_action(self, current_state, next_state) -> Action:
@@ -156,9 +222,10 @@ class AVDiscretizer(Discretizer):
     
     def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
         split_str = state_str.split(' ')
-        pos_str, vel_str, rot_str = split_str[0:3]
-        x, y = map(int, pos_str[len("(Position("):-2].split(','))
-        
+        block_str, pos_str, vel_str, rot_str = split_str[0:4]
+
+        progress_predicate = BlockProgress[block_str[:-2].split('(')[1]]
+        position_predicate = LanePosition[pos_str[:-2].split('(')[1]]
         mov_predicate = Velocity[vel_str[:-2].split('(')[1]]
         rot_predicate = Rotation[rot_str[:-2].split('(')[1]]
 
@@ -167,13 +234,16 @@ class AVDiscretizer(Discretizer):
             for cam_detections in split_str[3:]:
                 cam_type = cam_detections[:-1].split('(')[1]#map(str.strip, cam_detections[:-2].split(','))
                 detected_predicates.append(Predicate(DetectedObject, [DetectedObject(cam_type)]))
-            return (Predicate(Position, [x, y]),
+            return (Predicate(BlockProgress, [progress_predicate]),
+                        Predicate(LanePosition, [position_predicate]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]), *detected_predicates)
         else: 
-            return (Predicate(Position, [x, y]),
+            return (Predicate(BlockProgress, [progress_predicate]),
+                    Predicate(LanePosition, [position_predicate]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]))
+    
     
     #TODO: review
     def nearest_state(self, state):
@@ -231,9 +301,12 @@ class AVDiscretizer(Discretizer):
     def get_predicate_space(self):
         all_tuples = []
 
-        for v in Velocity:
-            for r in Rotation:
-                ##for cam_type in self.detection_cameras.append(0):
-                    all_tuples.append((v,r))
+        for p in BlockProgress:
+            for l in LanePosition:
+                for n in NextIntersection:
+                    for v in Velocity:
+                        for r in Rotation:
+                            ##for cam_type in self.detection_cameras.append(0):
+                            all_tuples.append((p,l,n,v,r))
         return all_tuples
 

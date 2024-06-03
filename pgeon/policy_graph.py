@@ -11,7 +11,8 @@ from pgeon.agent import Agent
 from pgeon.discretizer import Predicate, Discretizer
 import time
 import pandas as pd
-from example.discretizer.utils import Action
+from example.discretizer.utils import Action, BlockProgress,NextIntersection
+from example.discretizer.discretizer import AVDiscretizer
 import math
 
 class PolicyGraph(nx.MultiDiGraph):
@@ -29,7 +30,7 @@ class PolicyGraph(nx.MultiDiGraph):
         self.discretizer = discretizer
 
         #self.unique_states: Dict[str, int] = {}
-        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle'] 
+        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle', 'yaw'] 
         #these columns are used only to determine the action between 2 states in the training scenes 
         self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed
      
@@ -206,13 +207,16 @@ class PolicyGraph(nx.MultiDiGraph):
         
         trajectory = []
         tot_reward = 0
+
+        in_intersection = False
+        intersection_info = []
+
         for i in range(len(scene)-1):
             
             # discretize current state
             current_state_to_discretize = scene.iloc[i][self.state_to_be_discretized].tolist()
             current_detection_info = scene.iloc[i][self.detection_cameras] if self.detection_cameras else None
             discretized_current_state = self.discretizer.discretize(current_state_to_discretize, current_detection_info)
-            #current_state_id = self.add_unique_state(current_state_str)
 
 
             current_state_for_action = scene.iloc[i][self.state_columns_for_action].tolist()
@@ -222,8 +226,28 @@ class PolicyGraph(nx.MultiDiGraph):
    
             trajectory.extend([discretized_current_state, action_id])        
 
+            #check for intersection start
+            if discretized_current_state[0] == Predicate(BlockProgress, BlockProgress.INTERSECTION) and not in_intersection:
+                in_intersection = True
+                intersection_start = i
+                start_intersection_x, start_intersection_y = scene.iloc[i][['x', 'y']] if i > 0 else scene.iloc[i+1][['x', 'y']]
+                pre_intersection_x, pre_intersection_y = scene.iloc[i-1][['x', 'y']] if i > 0 else scene.iloc[i][['x', 'y']]
+
+            
+            #check for intersesction end
+            if in_intersection and discretized_current_state[0] != Predicate(BlockProgress, BlockProgress.INTERSECTION):
+                in_intersection = False
+
+                end_intersection_x, end_intersection_y = scene.iloc[i][['x', 'y']] if i+1<len(scene) else scene.iloc[i-1][['x', 'y']]
+                post_intersection_x, post_intersection_y = scene.iloc[i+1][['x', 'y']] if i+1<len(scene) else scene.iloc[i][['x', 'y']]
+
+                intersection_action = AVDiscretizer.determine_intersection_action((pre_intersection_x, pre_intersection_y, start_intersection_x, start_intersection_y), (end_intersection_x, end_intersection_y, post_intersection_x, post_intersection_y))
+                intersection_info.append((intersection_start, intersection_action))
+
+
+
             #TODO: also consider objects in the reward. Do i need to add reward to last state?
-            reward = self.environment.compute_reward(discretized_current_state, action)
+            reward = (0,0)#self.environment.compute_reward(discretized_current_state, action)
             tot_reward +=sum(reward)
 
             if verbose:
@@ -234,12 +258,16 @@ class PolicyGraph(nx.MultiDiGraph):
         last_state_to_discretize = scene.iloc[len(scene)-1][self.state_to_be_discretized].tolist()
         last_state_detections = scene.iloc[len(scene)-1][self.detection_cameras] if self.detection_cameras else None
         discretized_last_state = self.discretizer.discretize(last_state_to_discretize, last_state_detections)
-        #last_state_id = self.add_unique_state(last_state_str)
 
         trajectory.append(discretized_last_state)
-        self.environment.stop_points.add(discretized_last_state)     
-        reward = self.environment.compute_reward(discretized_last_state, None)
+        self.environment.stop_points.add(discretized_last_state)    
+
+        reward = (0,0)#self.environment.compute_reward(discretized_last_state, None)
         tot_reward +=sum(reward)
+
+
+        AVDiscretizer.assign_intersection_actions(trajectory, intersection_info)
+
 
         if verbose:
                 print('From', last_state_to_discretize, ' -> END ')
@@ -312,6 +340,7 @@ class PolicyGraph(nx.MultiDiGraph):
 
 
         for scene_token, group in scene_groups:
+            print(f'scene token: {scene_token}')
             trajectory_result, tot_reward = self._run_episode(group, verbose)
             self._update_with_trajectory(trajectory_result)
             self._trajectories_of_last_fit.append(trajectory_result)
@@ -1132,58 +1161,6 @@ class PGBasedPolicy(Agent):
 
 
     
-
-    
-    '''
-    def move_simple(self, action: Action):
-        """
-        Function that given current state and action returns the next continuous state.
-        
-        Args:
-            self --> current_state (tuple): (x, y, v, steering_angle) where steering_angle is in radians
-            action: Action taken (e.g., "go straight", "turn", "gas", etc.)
-        
-        Returns:
-        tuple: Updated state (x', y', v', new_steering_angle)
-
-
-        ref: https://es.mathworks.com/help/mpc/ug/obstacle-avoidance-using-adaptive-model-predictive-control.html
-
-        """
-        #TODO: how will detected objects change their state?
-        x, y, velocity, _, _, _, theta = self.current_state
-
-       
-        if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):
-            steer_angle = +0.5
-        if action in (Action.TURN_RIGHT, Action.GAS_TURN_RIGHT,  Action.BRAKE_TURN_RIGHT):
-            steer_angle = -0.5
-        else:
-            steer_angle = 0
-        
-        #steer_angle_rad = np.deg2rad(steer_angle)
-
-        #update velocity
-        if action in (Action.GAS,  Action.GAS_TURN_LEFT,Action.GAS_TURN_RIGHT):
-            velocity += 0.2 #self.discretizer.eps_vel ()
-        elif action in (Action.BRAKE,  Action.BRAKE_TURN_LEFT, Action.BRAKE_TURN_RIGHT):
-            velocity -= 0.2 #self.discretizer.eps_vel ()
-        
-        #update orientation (theta) based on steering angle and velocity
-        #new_theta = theta - (velocity / self.wheel_base) * np.tan(steer_angle) * self.dt if action not in [Action.STRAIGHT, Action.GAS, Action.BRAKE] else theta
-        new_theta = max(self.min_steer_angle, theta+steer_angle) if theta+steer_angle<0 else min(self.max_steer_angle,  theta + steer_angle)
-
-        # Update position based on velocity and orientation
-        delta_x = velocity * np.sin(new_theta) * self.dt
-        delta_y = velocity * np.cos(new_theta) * self.dt
-
-        # Calculate new position
-        new_x = x + delta_x
-        new_y = y + delta_y
-    
-        return (new_x, new_y, velocity,  _, _, _, new_theta)
-        
-    '''
 
     def step(self, action:Action) -> Tuple[Tuple[Predicate, Predicate, Predicate, Predicate], float, bool, str]:
         """

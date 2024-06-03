@@ -42,13 +42,19 @@ class BlockProgress(Enum):
             return f'{self.__class__.__name__}({self.name})'
 
 
-class NextIntersect(Enum): 
-    #what is my intention at the next intersection? Do i go left, STRAIGH or RIGHT?
+class NextIntersection(Enum):
+    #what is my behavior at the next intersection? Do i go left, STRAIGH or RIGHT?
     # This is something that you know being a driver of the vehicle and affects how you're going to drive.
     # This allows the check for desires.
+    RIGHT = auto()
     LEFT = auto()
     STRAIGHT = auto()
-    RIGHT = auto()
+    IDLE = auto()
+    NONE = auto()
+
+    def __str__(self):
+        return f'{self.__class__.__name__}({self.name})'
+
 
 #Discretizer D1a
 class DetectedObject(): #0 or camera_type if any object is present

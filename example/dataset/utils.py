@@ -4,6 +4,13 @@ import pandas as pd
 from shapely.geometry import Polygon
 from shapely import affinity
 
+def vector_angle(v1, v2):
+        """Calculate the angle between two vectors."""
+        dot_product = np.dot(v1, v2)
+        magnitude_v1 = np.linalg.norm(v1)
+        magnitude_v2 = np.linalg.norm(v2)
+        return np.arccos(dot_product / (magnitude_v1 * magnitude_v2))
+
 
 def calculate_direction_of_travel(tangent_vector, yaw, threshold=0):
         """
