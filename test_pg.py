@@ -4,7 +4,7 @@ import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
 from example.discretizer.discretizer import AVDiscretizer
-from example.discretizer.discretizer_d1 import AVDiscretizerD1
+from example.discretizer.discretizer_with_intentions import AVDiscretizerD1
 import pandas as pd
 
 
@@ -20,9 +20,6 @@ if __name__ == '__main__':
     parser.add_argument('--action-mode',
                         help='When visiting an unknown state, whether to choose action at random or based on what similar nodes chose.',
                         choices=['random', 'similar_nodes'])     
-    parser.add_argument('--episodes', type=int, 
-                        help='Amount of episodes to run', 
-                        default=100)
     parser.add_argument('--discretizer', type=int, 
                         help='Specify the discretizer of the input data.', 
                         choices=[0, 1, 2, 3], default=0)
@@ -37,7 +34,7 @@ if __name__ == '__main__':
 
     
     args = parser.parse_args()
-    training_id, episodes, city_id, discretizer_id, test_set, verbose = args.training_id, args.episodes, args.city, args.discretizer, args.test_set, args.verbose
+    training_id, city_id, discretizer_id, test_set, verbose = args.training_id, args.city, args.discretizer, args.test_set, args.verbose
     
 
     if city_id == 'b': 
@@ -69,11 +66,10 @@ if __name__ == '__main__':
         'delta_local_y': 'float64'
         #'is_destination': 'str'
     }
-    val_df = pd.read_csv(Path('example/dataset/data/sets/nuscenes') / test_set, dtype=dtype_dict, parse_dates=['timestamp'])
-    val_df = val_df[val_df['location'] == city]
+    test_df = pd.read_csv(Path('example/dataset/data/sets/nuscenes') / test_set, dtype=dtype_dict, parse_dates=['timestamp'])
+    test_df = test_df[test_df['location'] == city]
     
 
-    
 
 
     if args.policy_mode == 'original':
@@ -95,9 +91,10 @@ if __name__ == '__main__':
         edges_path = f'example/dataset/data/policy_graphs/{training_id}_edges.csv'
         
         #TODO: update
-        discretizer = {0: AVDiscretizer, 1: AVDiscretizerD1, 2: None, 3: None}[discretizer_id]()
         environment = SelfDrivingEnvironment(city)
-        pg = PG.PolicyGraph.from_nodes_and_edges(nodes_path, edges_path, environment, discretizer )
+        discretizer = {0: AVDiscretizer, 1: AVDiscretizerD1, 2: None, 3: None}[discretizer_id](environment)
+
+        pg = PG.PolicyGraph.from_nodes_and_edges(nodes_path, edges_path, environment, discretizer)
         agent = PG.PGBasedPolicy(pg, mode, node_not_found_mode)
     
         if verbose:
@@ -106,7 +103,7 @@ if __name__ == '__main__':
             print(f'Node not found mode: {node_not_found_mode}')
             print()
 
-        agent.test(num_episodes=episodes, seed=42, test_scenes=val_df, n_steps=20, verbose = True, plot = False)
+        avg_nll_action, std_nll_action, avg_nll_world, std_nll_world = agent.compute_static_metrics(test_set=test_df, verbose = verbose)
         
 
         #with open(f'example/dataset/data/rewards/rewards_{args.policy_mode}.csv', 'w+') as f:
@@ -128,12 +125,12 @@ if __name__ == '__main__':
    
     #tot_reward, reached_destination = env.compute_total_reward(agent, disc_initial_state, disc_final_state, max_steps=600)
     
-    #print(f'Final scene reward: {tot_reward}')
-    #print(f'Destination reached: {reached_destination}')
+    #print(f'Average NLL Interpretability/Reliability of actions: {nll_policy}')
+    #print(f'Average NLL Interpretability/Reliability of world model: {nll_world}')
 
     #with open(f'example/dataset/data/rewards/rewards_{args.policy_mode}.csv', 'w+') as f:
     #    csv_w = csv.writer(f)
     #    csv_w.writerow(tot_reward)
     
     
-    #python3 test_pg.py --training_id pg_Call_D0 --test_set 'test_v1.0-mini_lidar_0.csv' --policy-mode greedy --action-mode random --episodes 2 --discretizer 0 --city 'b' --verbose
+    #python3 test_pg.py --training_id pg_Call_D0 --test_set 'test_v1.0-mini_lidar_0.csv' --policy-mode greedy --action-mode random --discretizer 0 --city 'b' --verbose

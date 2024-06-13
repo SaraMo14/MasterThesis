@@ -44,28 +44,23 @@ class PolicyGraphEvaluator:
             entropy_metrics[state] = {'Hs': Hs, 'Ha': Ha, 'Hw': Hw}
         
         return entropy_metrics
-        
-    def compute_scene_reward(self, trajectories):
-        #TODO: handle discretize state before computing reward,
-        #TODO: fix
-        ''' Given an episode/scene with trajectory [state, action, next_state, ...], computes the average reward.'''
+           
+    '''
+    def update_state_tracking(self, state):
+        """
+        Updates the visited and newly discovered states based on the current state.
+        """
+        if state not in self.visited_states:
+            self.newly_discovered_states.add(state)
+        self.visited_states.add(state)
 
-        tot_reward = 0
-        for i in range(0, len(trajectories)-2, 2):
-            current_state = trajectories[i]
-            action = trajectories[i+1]
-            next_state = trajectories[i+2]
-            tot_reward += self.policy_graph.compute_reward(current_state, action, next_state)
-        return tot_reward
 
-    def calculate_tl(self):
-        """Calculates the Transferred Learning (TL) metric."""
-        pass
+    def compute_proportion_of_discovery(self):
+        """
+        Computes the proportion of newly discovered states to total visited states.
+        """
+        if len(self.visited_states) == 0:
+            return 0  # Prevent division by zero
+        return len(self.newly_discovered_states) / len(self.visited_states)
+    '''
 
-    def calculate_std(self):
-        """Calculates the Standard Deviation (STD) metric."""
-        pass
-
-    def calculate_ns(self):
-        """Calculates the New States (NS) visited metric."""
-        pass        

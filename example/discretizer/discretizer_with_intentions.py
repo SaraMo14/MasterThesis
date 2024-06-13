@@ -1,5 +1,6 @@
-from example.discretizer.utils import Position, Velocity, Rotation
+from example.discretizer.utils import Velocity, Rotation
 from example.discretizer.discretizer import AVDiscretizer
+from example.environment import SelfDrivingEnvironment
 from typing import Tuple, Union
 import ast
 from pgeon.discretizer import Predicate
@@ -50,8 +51,8 @@ class DetectLeft(Detection):
 
 
 class AVDiscretizerD1(AVDiscretizer):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, environment: SelfDrivingEnvironment):
+        super().__init__(environment)
         self.DETECTION_CLASS_MAPPING = {
         'CAM_FRONT_LEFT': DetectFrontLeft,
         'CAM_FRONT_RIGHT': DetectFrontRight,

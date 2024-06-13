@@ -2,10 +2,12 @@ import argparse
 import os
 from pathlib import Path
 import pandas as pd
-from nuscenes.nuscenes import NuScenes
 import utils
+from table_loader import BaseTableLoader
+import time
 
-class SceneDataProcessor:
+
+class SceneDataProcessor(BaseTableLoader):
     """
         Processes agent data from the nuScenes dataset, creating a DataFrame with additional columns for velocity,
         acceleration, and heading change rate, based on sensor data filtering. 
@@ -13,30 +15,50 @@ class SceneDataProcessor:
 
     """
     def __init__(self, dataroot, dataoutput, version, key_frames, sensor, complexity):
+        super().__init__(dataroot, version)
+
         self.dataroot = dataroot
         self.dataoutput = dataoutput
         self.version = version
         self.key_frames = key_frames
         self.sensor = sensor
         self.complexity = complexity
-        self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
+        #self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
+
+        start_time = time.time()
+        print("======\nLoading NuScenes tables for version {}...".format(self.version))
+
+        self.sample_data = self.__load_table__('sample_data', drop_fields=['next', 'prev', 'width', 'height', 'filename','timestamp','fileformat'])
+        print('sample_data loaded')
+        self.calibrated_sensor = self.__load_table__('calibrated_sensor')
+        print('calibrated_sensor loaded')
+        self.sensors = self.__load_table__('sensor')
+        print('sensor loaded')        
+        self.ego_pose = self.__load_table__('ego_pose')     
+        print('ego_pose loaded')
+        #self.__make_reverse_index__(verbose=True)
+        print("Done loading in {:.3f} seconds.\n======".format(time.time() - start_time))
+
+
+
 
     def process_scene_data(self):
         sample = pd.read_csv(Path(self.dataoutput) / 'can_data.csv')
         #os.remove(Path(self.dataoutput) / 'can_data.csv')
-
         if self.complexity > 0:
             cam_data_path = Path(self.dataoutput) / 'cam_detection.csv'
             sample = pd.merge(sample, pd.read_csv(cam_data_path), on='sample_token')
-            
-        sample_data = pd.DataFrame(self.nuscenes.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token', 'calibrated_sensor_token']]
+
+        sample_data = pd.DataFrame(self.sample_data).query(f"is_key_frame == {self.key_frames}")[['sample_token', 'ego_pose_token', 'calibrated_sensor_token']]
         
-        calibrated_sensors = pd.DataFrame(self.nuscenes.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
-        sensors = pd.DataFrame(self.nuscenes.sensor).rename(columns={'token': 'sensor_token'})
+        calibrated_sensors = pd.DataFrame(self.calibrated_sensor).rename(columns={'token': 'calibrated_sensor_token'})
+        
+        sensors = pd.DataFrame(self.sensors).rename(columns={'token': 'sensor_token'})
         sensors = sensors[sensors['modality'] == self.sensor].merge(calibrated_sensors, on='sensor_token').drop(columns=['rotation', 'translation', 'channel', 'camera_intrinsic', 'sensor_token'])
+
         merged_df = sensors.merge(sample_data, on='calibrated_sensor_token').drop(columns=['calibrated_sensor_token'])
 
-        ego_pose = pd.DataFrame(self.nuscenes.ego_pose).rename(columns={'token': 'ego_pose_token'})
+        ego_pose = pd.DataFrame(self.ego_pose).rename(columns={'token': 'ego_pose_token'})
         ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
         merged_df = sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
         
@@ -46,7 +68,7 @@ class SceneDataProcessor:
         merged_df.sort_values(by=['scene_token', 'timestamp'], inplace=True)
         
         final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics)#.dropna()
-        
+
         final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
         return final_df
 

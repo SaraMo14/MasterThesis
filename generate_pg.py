@@ -3,7 +3,7 @@ import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
 from example.discretizer.discretizer import AVDiscretizer
-from example.discretizer.discretizer_d1 import AVDiscretizerD1
+from example.discretizer.discretizer_with_intentions import AVDiscretizerD1
 import pandas as pd
 
 if __name__ == '__main__':
@@ -20,11 +20,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     data_folder, data_file, city_id, verbose, output_format, discretizer_id = args.input, args.file, args.city, args.verbose, args.output, args.discretizer
 
-    
-    #TODO: update
-    discretizer = {0: AVDiscretizer, 1: AVDiscretizerD1, 2: None, 3: None}[discretizer_id]()
-    
-    env = SelfDrivingEnvironment()
+     
 
     dtype_dict = {
         'modality': 'category',  # for limited set of modalities, 'category' is efficient
@@ -56,11 +52,15 @@ if __name__ == '__main__':
     #else:
     #    city=None
  
+    #TODO: update
+    env = SelfDrivingEnvironment(city)
+    discretizer = {0: AVDiscretizer, 1: AVDiscretizerD1, 2: None, 3: None}[discretizer_id](env)
+   
+
     df = pd.read_csv(Path(data_folder) / data_file, dtype=dtype_dict, parse_dates=['timestamp'])
     
     if city_id != 'all':
         df = df[df['location'] == city]
-
     
     
     pg = PG.PolicyGraph(env, discretizer)

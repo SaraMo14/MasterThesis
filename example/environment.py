@@ -15,7 +15,7 @@ class SelfDrivingEnvironment(Environment):
 
     def __init__(self, city = "boston-seaport"):
         
-        self.stop_points = set() #list of destinations of scenes
+        #self.stop_points = set() #list of destinations of scenes
 
         self.city = city
         self.nusc_map = NuScenesMap(dataroot='example/dataset/data/sets/nuscenes', map_name = city)

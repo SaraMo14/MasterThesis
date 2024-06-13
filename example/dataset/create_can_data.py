@@ -1,23 +1,47 @@
 import pandas as pd
 from nuscenes.can_bus.can_bus_api import NuScenesCanBus
-from nuscenes import NuScenes
 import argparse
 
 from pathlib import Path
 
-class CANDataProcessor:
+
+import os.path as osp
+from table_loader import BaseTableLoader
+import time
+
+
+class CANDataProcessor(BaseTableLoader):
     
     def __init__(self, dataroot, dataoutput, version):
+        super().__init__(dataroot, version)
+
+        
         self.dataroot = dataroot
         self.dataoutput = dataoutput
         self.version = version
-        self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
+        #self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
         self.nusc_can = NuScenesCanBus(dataroot=Path(dataroot))
 
+
+        assert osp.exists(self.table_root), 'Database version not found: {}'.format(self.table_root)
+
+        start_time = time.time()
+        print("======\nLoading NuScenes tables for version {}...".format(self.version))
+
+        self.log = self.__load_table__('log')
+        print('log loaded')
+        self.scene = self.__load_table__('scene')
+        print('scene loaded')
+        self.sample = self.__load_table__('sample')
+        print('sample loaded')
+        print("Done loading in {:.3f} seconds.\n======".format(time.time() - start_time))
+
+
     def process_CAN_data(self):
-        log_data = pd.DataFrame(self.nuscenes.log)[['token', 'location']].rename(columns={'token': 'log_token'})
-        scene = pd.DataFrame(self.nuscenes.scene)[['token', 'name', 'log_token']].rename(columns={'token': 'scene_token'})
-        sample = pd.DataFrame(self.nuscenes.sample)[['token', 'timestamp', 'scene_token']].rename(columns={'token': 'sample_token', 'timestamp': 'utime'}).merge(scene, on='scene_token')
+
+        log_data = pd.DataFrame(self.log)[['token', 'location']].rename(columns={'token': 'log_token'})
+        scene = pd.DataFrame(self.scene)[['token', 'name', 'log_token']].rename(columns={'token': 'scene_token'})
+        sample = pd.DataFrame(self.sample)[['token', 'timestamp', 'scene_token']].rename(columns={'token': 'sample_token', 'timestamp': 'utime'}).merge(scene, on='scene_token')
 
         valid_scene_names = [name for name in scene['name'] if int(name[-4:]) not in self.nusc_can.can_blacklist]
         merged_CAN_data_list = []
@@ -32,6 +56,22 @@ class CANDataProcessor:
         output_path = Path(self.dataoutput) / 'can_data.csv'
         merged_CAN_df.to_csv(output_path, index=False)
         print(f"Processed CAN data saved to {output_path}")
+    
+    '''
+    @property
+    def table_root(self) -> str:
+        """ Returns the folder where the tables are stored for the relevant version. """
+        return osp.join(self.dataroot, self.version)
+
+    def __load_table__(self, table_name) -> dict:
+        """ Loads a table. """
+        with open(osp.join(self.table_root, '{}.json'.format(table_name))) as f:
+            table = json.load(f)
+        return table
+    '''
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process nuScenes CAN data and save to a file.")
@@ -42,3 +82,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     processor = CANDataProcessor(args.dataroot, args.dataoutput, args.version)
     processor.process_CAN_data()
+
+    #/home/saramontese/Desktop/MasterThesis/example/dataset/create_can_data.py --dataroot /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --dataoutput /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --version v1.0-trainval

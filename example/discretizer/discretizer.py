@@ -25,9 +25,12 @@ class AVDiscretizer(Discretizer):
         
         self.frequency = 0.5 #2Hz
         
-        self.agent_size = (2,4)#(1.730, 4.084) #width, length in metres
+        self.agent_size = (1.730, 4.084) #(2,4)#width, length in metres
 
-    
+        self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle', 'yaw'] 
+        #these columns are used only to determine the action between 2 states in the training scenes 
+        self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed      
+
     
     
     @staticmethod
@@ -149,8 +152,6 @@ class AVDiscretizer(Discretizer):
         else:
             return Predicate(NextIntersection,[NextIntersection.RIGHT])
 
-
-
     ##################################
     
 
@@ -202,6 +203,20 @@ class AVDiscretizer(Discretizer):
         return Action.IDLE
 
 
+
+    def _discretize_state_and_action(self, scene, i):
+        #Given a scene from the dataset, it discretizes the current state (i) and determines the  following action.
+        current_state_to_discretize = scene.iloc[i][self.state_to_be_discretized].tolist()
+        current_detection_info = scene.iloc[i][self.detection_cameras] if self.detection_cameras else None
+        discretized_current_state = self.discretize(current_state_to_discretize, current_detection_info)
+
+        current_state_for_action = scene.iloc[i][self.state_columns_for_action].tolist()
+        next_state_for_action = scene.iloc[i+1][self.state_columns_for_action].tolist()
+        action = self.determine_action(current_state_for_action, next_state_for_action)
+        action_id = self.get_action_id(action)
+        
+        return discretized_current_state, action_id
+
     @staticmethod
     def get_action_id(action):
             return action.value
@@ -222,75 +237,86 @@ class AVDiscretizer(Discretizer):
     
     def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
         split_str = state_str.split(' ')
-        block_str, pos_str, vel_str, rot_str = split_str[0:4]
+        block_str, lane_pos_str, next_inter_str, vel_str, rot_str = split_str[0:5]
 
-        progress_predicate = BlockProgress[block_str[:-2].split('(')[1]]
-        position_predicate = LanePosition[pos_str[:-2].split('(')[1]]
+        progress_predicate = BlockProgress[block_str[:-2].split('(')[2]] 
+        position_predicate = LanePosition[lane_pos_str[:-2].split('(')[1]]
+        intersection_predicate = NextIntersection[next_inter_str[:-2].split('(')[1]]
         mov_predicate = Velocity[vel_str[:-2].split('(')[1]]
         rot_predicate = Rotation[rot_str[:-2].split('(')[1]]
 
-        if split_str[4:]:
+        #TODO: fix
+        if split_str[5:]:
             detected_predicates = []
             for cam_detections in split_str[3:]:
                 cam_type = cam_detections[:-1].split('(')[1]#map(str.strip, cam_detections[:-2].split(','))
                 detected_predicates.append(Predicate(DetectedObject, [DetectedObject(cam_type)]))
             return (Predicate(BlockProgress, [progress_predicate]),
                         Predicate(LanePosition, [position_predicate]),
+                        Predicate(NextIntersection, [intersection_predicate]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]), *detected_predicates)
         else: 
             return (Predicate(BlockProgress, [progress_predicate]),
                     Predicate(LanePosition, [position_predicate]),
+                        Predicate(NextIntersection, [intersection_predicate]),
                         Predicate(Velocity, [mov_predicate]),
                         Predicate(Rotation, [rot_predicate]))
     
     
-    #TODO: review
+    #TODO: TAKE INTO ACCOUNT DETECTIONS
     def nearest_state(self, state):
-        og_position, og_velocity, og_angle, *detections = state
+        og_block_progress, og_lane_position, og_next_intersection, og_velocity, og_angle, *detections = state
 
-        x,y = og_position.value
-
+        #NOTE: the order of the following conditions affects the yielded Predicates, thus introducing bias.
         # Generate nearby positions considering discretization
-        for dx in [-2, -1, 0, 1, 2]:
-            for dy in [-2, -1, 0, 1, 2]:
-                new_x,new_y = x + dx, y + dy
-                if (new_x, new_y) != (x, y):
-                    yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle, *detections
+        for b in BlockProgress:
+            if b != og_block_progress.value:
+                yield Predicate(BlockProgress, b),og_lane_position, og_next_intersection, og_velocity, og_angle, *detections
+        
+        for l in LanePosition:
+            if l != og_lane_position.value:
+                yield og_block_progress, Predicate(LanePosition, l), og_next_intersection, og_velocity, og_angle, *detections
+
+        for n in NextIntersection:
+            if n != og_next_intersection.value:
+                yield og_block_progress, og_lane_position, Predicate(NextIntersection, n), og_velocity, og_angle, *detections
 
         for v in Velocity:
             if v != og_velocity.value:
-                yield og_position, Predicate(Velocity, v), og_angle, *detections
+                yield og_block_progress, og_lane_position, Predicate(Velocity, v), og_angle, *detections
+        
         for r in Rotation:
             if r != og_angle.value:
-                yield og_position, og_velocity, Predicate(Rotation, r), *detections
+                yield og_block_progress, og_lane_position, og_velocity, Predicate(Rotation, r), *detections
         
+        #TODO: fix
         if len(detections)>0:
             for objs in [(DetectedObject('CAM_FRONT'), DetectedObject()),
                 (DetectedObject('CAM_FRONT'), DetectedObject('CAM_BACK')),
                 (DetectedObject(), DetectedObject('CAM_BACK'))]:
                 if objs not in detections:
-                    yield og_position, og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
+                    yield og_block_progress, og_lane_position, og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
             
         
 
-        for dx in [-2, -1, 0, 1, 2]:
-            for dy in [-2, -1, 0, 1, 2]:
-                new_x,new_y = x + dx, y + dy
-                if (new_x, new_y) != (x, y):
+        for b in BlockProgress:
+            for l in LanePosition:
+                for n in NextIntersection:
                     for v in Velocity:
-                        if v != og_velocity.value:
-                            yield Predicate(Position, [new_x, new_y]), Predicate(Velocity, v), og_angle, *detections
-                    for r in Rotation:
-                        if r != og_angle.value:
-                            yield Predicate(Position, [new_x, new_y]), og_velocity, Predicate(Rotation, r), *detections
+                        for r in Rotation:
+                            amount_of_equals_to_og = \
+                                int(b == og_block_progress.value) + int(l == og_lane_position.value) + int(n == og_next_intersection.value) + int(v == og_velocity.value) + int(r==og_angle.value)
+                            if amount_of_equals_to_og <=3:
+                                yield Predicate(BlockProgress, b), Predicate(LanePosition, l), Predicate(NextIntersection, n), Predicate(Velocity, v), Predicate(Rotation, r), *detections
 
-                    if len(detections)>0:
-                        for objs in [(DetectedObject('CAM_FRONT'), DetectedObject()),
-                            (DetectedObject('CAM_FRONT'), DetectedObject('CAM_BACK')),
-                            (DetectedObject(), DetectedObject('CAM_BACK'))]:
-                            if objs not in detections:
-                                yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
+                        #TODO: fix
+                        #if len(detections)>0:
+                        #    for objs in [(DetectedObject('CAM_FRONT'), DetectedObject()),
+                        #        (DetectedObject('CAM_FRONT'), DetectedObject('CAM_BACK')),
+                        #        (DetectedObject(), DetectedObject('CAM_BACK'))]:
+                        #        if objs not in detections:
+                        #            yield Predicate(Position, [new_x, new_y]), og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
 
 
 
