@@ -1,5 +1,4 @@
 import argparse
-import os
 from pathlib import Path
 import pandas as pd
 import utils
@@ -60,7 +59,7 @@ class SceneDataProcessor(BaseTableLoader):
 
         ego_pose = pd.DataFrame(self.ego_pose).rename(columns={'token': 'ego_pose_token'})
         ego_pose[['x', 'y', 'z']] = pd.DataFrame(ego_pose['translation'].tolist(), index=ego_pose.index)
-        merged_df = sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'sample_token', 'translation'])
+        merged_df = sample.merge(merged_df, on='sample_token').merge(ego_pose, on='ego_pose_token').drop(columns=['ego_pose_token', 'translation'])
         
         merged_df['yaw'] = merged_df['rotation'].apply(utils.quaternion_yaw).drop(columns=['rotation'])
 

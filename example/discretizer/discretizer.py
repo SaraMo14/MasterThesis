@@ -13,9 +13,9 @@ class AVDiscretizer(Discretizer):
 
         self.enviroment = environment
 
-        self.velocity_thr = [0.2, 6, 11, 17]#m/s while in km/h would be[0, 20, 40, 60] 
+        self.velocity_thr = [0.16630834573952916, 7.269930491687321, 11.087233438147942,  14.274223926233333] #[0.2, 6, 11, 17]#m/s 
         #self.yaw_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
-        self.rotation_thr = [-3, -0.3, 0.3 , 3]
+        self.rotation_thr = [-2.3987751180862764, -0.2867895294676068, 0.27338918491059877, 3.215895103945492]# [-3, -0.3, 0.3 , 3]
         self.chunk_size = 4
         self.eps_rot = 0.4
         self.eps_vel = 0.5 #0.2

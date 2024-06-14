@@ -13,12 +13,12 @@ from typing import Tuple, List
 
 class SelfDrivingEnvironment(Environment):
 
-    def __init__(self, city = "boston-seaport"):
+    def __init__(self, city = "boston-seaport", dataroot = 'example/dataset/data/sets/nuscenes'):
         
         #self.stop_points = set() #list of destinations of scenes
 
         self.city = city
-        self.nusc_map = NuScenesMap(dataroot='example/dataset/data/sets/nuscenes', map_name = city)
+        self.nusc_map = NuScenesMap(dataroot=dataroot, map_name = city)
         self.dividers = getattr(self.nusc_map, 'road_divider') + getattr(self.nusc_map, 'lane_divider')
 
         self.current_state = None
