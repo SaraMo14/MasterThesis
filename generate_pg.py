@@ -35,10 +35,7 @@ if __name__ == '__main__':
         'yaw': 'float64',  
         'velocity': 'float64',
         'acceleration': 'float64',
-        'heading_change_rate': 'float64',
-        'delta_local_x': 'float64',
-        'delta_local_y': 'float64'
-        #'is_destination': 'str'
+        'yaw_rate': 'float64'
     }
 
     if city_id == 'b': 

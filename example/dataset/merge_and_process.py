@@ -68,7 +68,7 @@ class SceneDataProcessor(BaseTableLoader):
         
         final_df = merged_df.groupby('scene_token', as_index=False).apply(utils.calculate_dynamics)#.dropna()
 
-        final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
+        #final_df = pd.concat([utils.convert_coordinates(group) for _, group in final_df.groupby('scene_token')])
         return final_df
 
     def run_processing(self, test_size, random_state=42):

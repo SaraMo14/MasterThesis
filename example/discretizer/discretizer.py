@@ -5,7 +5,7 @@ import numpy as np
 from typing import Tuple, List, Union
 from pgeon.discretizer import Discretizer, Predicate
 
-# this class is a discretizer for discretizers D0 (no cameras), D1A (generic and with 2 cameras)
+# this class is a discretizer for discretizers D0 (no cameras), D1 (with 2 cameras)
 
 class AVDiscretizer(Discretizer):
     def __init__(self, environment: SelfDrivingEnvironment):
@@ -13,29 +13,25 @@ class AVDiscretizer(Discretizer):
 
         self.enviroment = environment
 
-        self.velocity_thr = [0.16630834573952916, 7.269930491687321, 11.087233438147942,  14.274223926233333] #[0.2, 6, 11, 17]#m/s 
+        self.velocity_thr = [0.2, 7.3, 11.1,  14.3] #[0.2, 6, 11, 17]#m/s 
         #self.yaw_thr = [-2*np.pi/3, -np.pi/3, np.pi/3, 2*np.pi/3]  #[-2.5, -1, 0., 1, 2.5] #radiants
-        self.rotation_thr = [-2.3987751180862764, -0.2867895294676068, 0.27338918491059877, 3.215895103945492]# [-3, -0.3, 0.3 , 3]
-        self.chunk_size = 4
+        self.rotation_thr = [-2.4, -0.3, 0.3, 3.2]# [-3, -0.3, 0.3 , 3]
         self.eps_rot = 0.4
-        self.eps_vel = 0.5 #0.2
-        self.eps_acc = 0.2
-        self.eps_pos_x = 0.1
-        self.eps_pos_y = 0.2
-        
+        self.eps_vel = 0.2 #0.5 
+        self.eps_acc = 0.3
+
         self.frequency = 0.5 #2Hz
         
-        self.agent_size = (1.730, 4.084) #(2,4)#width, length in metres
+        self.agent_size = (1.730, 4.084) #width, length in meters
 
         self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle', 'yaw'] 
-        #these columns are used only to determine the action between 2 states in the training scenes 
-        self.state_columns_for_action = ['delta_local_x', 'delta_local_y', 'velocity', 'acceleration', 'steering_angle'] #heading_change_rate not needed      
+        self.state_columns_for_action = ['velocity', 'acceleration', 'steering_angle']     
 
     
     
     @staticmethod
     def is_close(a, b, eps=0.1):
-        return abs(a - b) <= eps
+        return abs(a - b) < eps
 
     ##################################
     ### DISCRETIZERS
@@ -65,13 +61,13 @@ class AVDiscretizer(Discretizer):
                 Predicate(Rotation, [rot_predicate]))
         
 
-    def discretize_detections(self, detections)-> List:
-        detected_predicates = []
-        for cam_type, objects in detections.items():
-            obj = DetectedObject() if objects=="{}" else DetectedObject(cam_type) 
+    #def discretize_detections(self, detections)-> List:
+    #    detected_predicates = []
+    #    for cam_type, objects in detections.items():
+    #        obj = DetectedObject() if objects=="{}" else DetectedObject(cam_type) 
             
-            detected_predicates.append(Predicate(DetectedObject, [obj]))
-        return detected_predicates
+    #        detected_predicates.append(Predicate(DetectedObject, [obj]))
+    #    return detected_predicates
 
 
     def discretize_steering_angle(self, steering_angle: float)->Rotation:
@@ -97,29 +93,41 @@ class AVDiscretizer(Discretizer):
     
     
         
-    def assign_intersection_actions(trajectory, intersection_info):
+    def assign_intersection_actions(self,trajectory, intersection_info, verbose = False):
         """
         Assigns actions based on intersection information.
 
         Args:
             trajectory: List containing the discretized trajectory.
-            intersection_info: List storing information about intersections.
+            intersection_info: List storing information about intersections as.
 
         Returns:
             Updated trajectory with assigned actions for intersections.
         """
         for i in range(0, len(trajectory), 2):  # Access states
             if trajectory[i][0] == Predicate(BlockProgress, BlockProgress.INTERSECTION):
-                print(f'frame {i/2} --> {trajectory[i]}')
+                if verbose:
+                    print(f'frame {int(i/2)} --> {trajectory[i]}')
+                    if i<len(trajectory) - 1:
+                        print(f'action: {self.get_action_from_id(trajectory[i+1])}')
+                    else:
+                        print('END')
                 continue
 
+
             for idx, action in intersection_info:
-                if 2 * idx > i and 2 * idx < len(trajectory) - 1:
+                if 2 * idx > i and 2 * idx < len(trajectory) - 1: #check if the intersection state (2*idx) comes next the current state (i)
                     state = list(trajectory[i])
                     state[2] = action
                     trajectory[i] = tuple(state)
                     break
-            print(f'frame {i/2} --> {trajectory[i]}')
+            if verbose:
+                    print(f'frame {int(i/2)} --> {trajectory[i]}')
+                    if i<len(trajectory) - 1:
+                        print(f'action: {self.get_action_from_id(trajectory[i+1])}')
+                    else:
+                        print('END')
+
         return trajectory
     
 
@@ -143,7 +151,6 @@ class AVDiscretizer(Discretizer):
         pre_vector = np.array([x_2 - x_1, y_2 - y_1]) 
         post_vector = np.array([x_n1 - x_n, y_n1 - y_n]) 
         angle = vector_angle(pre_vector, post_vector)
-
         #Determine action based on the angle
         if abs(angle) < np.radians(30):
             return Predicate(NextIntersection,[NextIntersection.STRAIGHT])
@@ -158,49 +165,50 @@ class AVDiscretizer(Discretizer):
 
 
 
-    def determine_action(self, current_state, next_state) -> Action:
-        delta_x0, delta_y0, vel_t,  acc_t0, steer_t0 = current_state
-        delta_x1, delta_y1, vel_t1,  acc_t1, steer_t1 = next_state
-
-        if self.is_close(delta_x1, 0, self.eps_pos_x) and self.is_close(delta_y1, 0, self.eps_pos_y) and self.is_close(vel_t, 0, self.eps_vel):
+    def determine_action(self, next_state) -> Action:
+        vel_t1,  acc_t1, steer_t1 = next_state
+        if vel_t1 < self.eps_vel and self.is_close(acc_t1,0,self.eps_acc):
             return Action.IDLE
-        #if delta_y1 < -self.eps_pos_y:
-            #return Action.REVERSE
-
+    
         # determine acceleration
-        if acc_t1 > self.eps_acc:
+        if acc_t1 >= self.eps_acc and vel_t1>=self.eps_vel:
             acc_action = Action.GAS
-        elif acc_t1 < -self.eps_acc:
+        elif acc_t1 <= -self.eps_acc and vel_t1>=self.eps_vel:
             acc_action = Action.BRAKE
         else:
             acc_action = None
 
         # determine direction
-        if steer_t0 < -self.eps_rot:#delta_x1 > self.eps_pos_x:
+        if steer_t1 <= -self.eps_rot:#_r:#delta_x1 > self.eps_pos_x: #TODO : steer_t1 or t0?
             dir_action = Action.TURN_RIGHT
-        elif steer_t0 > self.eps_rot:#delta_x1 < -self.eps_pos_x:
+        elif steer_t1 >= self.eps_rot:#_l:#delta_x1 < -self.eps_pos_x:
             dir_action = Action.TURN_LEFT
         else:
             dir_action = Action.STRAIGHT
 
-        if acc_action == Action.GAS and dir_action == Action.TURN_RIGHT:
-            return Action.GAS_TURN_RIGHT
-        elif acc_action == Action.GAS and dir_action == Action.TURN_LEFT:
-            return Action.GAS_TURN_LEFT
-        elif acc_action == Action.GAS and dir_action == Action.STRAIGHT:
-            return Action.GAS#_STRAIGHT
-        elif acc_action == Action.BRAKE and dir_action == Action.TURN_RIGHT:
-            return Action.BRAKE_TURN_RIGHT
-        elif acc_action == Action.BRAKE and dir_action == Action.TURN_LEFT:
-            return Action.BRAKE_TURN_LEFT
-        elif acc_action == Action.BRAKE and dir_action == Action.STRAIGHT:
-            return Action.BRAKE#_STRAIGHT
+       # Combine acceleration and direction actions
+        if acc_action == Action.GAS:
+            if dir_action == Action.TURN_RIGHT:
+                return Action.GAS_TURN_RIGHT
+            elif dir_action == Action.TURN_LEFT:
+                return Action.GAS_TURN_LEFT
+            else:
+                return Action.GAS
+        elif acc_action == Action.BRAKE:
+            if dir_action == Action.TURN_RIGHT:
+                return Action.BRAKE_TURN_RIGHT
+            elif dir_action == Action.TURN_LEFT:
+                return Action.BRAKE_TURN_LEFT
+            else:
+                return Action.BRAKE
         elif acc_action is None:
-            # fallback to direction if no acceleration action was determined
+            # Fallback to direction if no acceleration action was determined
             return dir_action
 
+        #NOTE: we do not consider Action.REVERSE
+
         # if no other conditions met
-        return Action.IDLE
+        return Action.STRAIGHT
 
 
 
@@ -210,9 +218,8 @@ class AVDiscretizer(Discretizer):
         current_detection_info = scene.iloc[i][self.detection_cameras] if self.detection_cameras else None
         discretized_current_state = self.discretize(current_state_to_discretize, current_detection_info)
 
-        current_state_for_action = scene.iloc[i][self.state_columns_for_action].tolist()
         next_state_for_action = scene.iloc[i+1][self.state_columns_for_action].tolist()
-        action = self.determine_action(current_state_for_action, next_state_for_action)
+        action = self.determine_action(next_state_for_action)
         action_id = self.get_action_id(action)
         
         return discretized_current_state, action_id

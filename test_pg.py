@@ -61,10 +61,7 @@ if __name__ == '__main__':
         'yaw': 'float64',  
         'velocity': 'float64',
         'acceleration': 'float64',
-        'heading_change_rate': 'float64',
-        'delta_local_x': 'float64',
-        'delta_local_y': 'float64'
-        #'is_destination': 'str'
+        'yaw_rate': 'float64'
     }
     test_df = pd.read_csv(Path('example/dataset/data/sets/nuscenes') / test_set, dtype=dtype_dict, parse_dates=['timestamp'])
     test_df = test_df[test_df['location'] == city]

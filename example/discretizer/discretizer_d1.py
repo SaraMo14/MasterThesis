@@ -29,7 +29,7 @@ class Detection:
     def __hash__(self):
         return hash(self.count)
 
-class DetectInFront(Detection):
+class DetectFront(Detection):
     pass
 
 class DetectBack(Detection):

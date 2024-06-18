@@ -221,10 +221,6 @@ class PolicyGraph(nx.MultiDiGraph):
                 intersection_info.append((intersection_start, intersection_action))
 
 
-            if verbose:
-                state_to_discretize = scene.iloc[i][self.discretizer.state_to_be_discretized].tolist()
-                print('From', state_to_discretize, ' -> ', action_id)
-
         #add last state
         last_state_to_discretize = scene.iloc[len(scene)-1][self.discretizer.state_to_be_discretized].tolist()
         last_state_detections = scene.iloc[len(scene)-1][self.discretizer.detection_cameras] if self.discretizer.detection_cameras else None
@@ -234,12 +230,7 @@ class PolicyGraph(nx.MultiDiGraph):
         #self.environment.stop_points.add(discretized_last_state)    
 
 
-        AVDiscretizer.assign_intersection_actions(trajectory, intersection_info)
-
-
-        if verbose:
-                print('From', last_state_to_discretize, ' -> END ')
-                
+        self.discretizer.assign_intersection_actions(trajectory, intersection_info, verbose)                
 
         return trajectory
     
@@ -1048,7 +1039,7 @@ class PGBasedPolicy(Agent):
 
         x, y, speed, yaw_rate, accel, yaw, steering_angle= self.current_state
 
-        accel = 0
+        accel = 0 #TODO: delete
         steer = 0
         
         if action in (Action.TURN_LEFT, Action.GAS_TURN_LEFT, Action.BRAKE_TURN_LEFT):

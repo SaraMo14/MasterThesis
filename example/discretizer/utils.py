@@ -56,7 +56,49 @@ class NextIntersection(Enum):
         return f'{self.__class__.__name__}({self.name})'
 
 
-#Discretizer D1a
+class Detection:
+    chunks = ["0", "1-4", "5+"]
+
+    def __init__(self, count=0):
+        if isinstance(count, str):
+            self.count = count
+        elif count == 0:
+            self.count = self.chunks[0]
+        elif count < 5:
+            self.count = self.chunks[1]
+        else:
+            self.count = self.chunks[2]
+    
+    def __str__(self) -> str:
+        return f'{self.count}'
+
+    def __eq__(self, other):
+        return self.count == other.count
+    
+    def __hash__(self):
+        return hash(self.count)
+
+class DetectFront(Detection):
+    pass
+
+class DetectBack(Detection):
+    pass
+
+class DetectFrontRight(Detection):
+    pass
+
+class DetectFrontLeft(Detection):
+    pass
+
+class DetectRight(Detection):
+    pass
+
+class DetectLeft(Detection):
+    pass
+
+
+
+'''
 class DetectedObject(): #0 or camera_type if any object is present
     def __init__(self, cam_type=None):
         self.cam_type = cam_type if cam_type is not None else 0
@@ -69,7 +111,7 @@ class DetectedObject(): #0 or camera_type if any object is present
     
     def __hash__(self):
         return hash(self.cam_type)
-
+'''
 
 
 
@@ -85,7 +127,6 @@ class Action(Enum):
   GAS_TURN_LEFT= auto()
   BRAKE_TURN_RIGHT = auto()  
   BRAKE_TURN_LEFT = auto()
-  #TODO:differentiate between sharp and slight accelaraion, slight turn, ..., lane keeping, preparing to lane change, and lane changing (more of intentations)
 
 
 

@@ -177,18 +177,20 @@ def calculate_dynamics(group: pd.DataFrame) -> pd.DataFrame:
         
         # Meters / second.
         group['velocity'] = displacements / valid_time_diffs
-        
+        #replace NaN values with the next valid value
+        group.loc[group.index[0], ['velocity', 'yaw_rate']] = group.loc[group.index[1], ['velocity']]
+
         # Meters / second^2.
         group['acceleration'] = group['velocity'].diff() / valid_time_diffs
         
-        # Radians / second.
+
         group['yaw_rate'] = group['yaw'].diff() / valid_time_diffs
 
         # For the first annotation, replace NaN values with the next valid value
-        group.loc[group.index[0], ['velocity', 'acceleration', 'yaw_rate']] = group.loc[group.index[1], ['velocity', 'acceleration', 'yaw_rate']]
+        group.loc[group.index[0], ['acceleration', 'yaw_rate']] = group.loc[group.index[1], ['acceleration','yaw_rate']]
 
         # For the last annotation, replace NaN values with the previous valid value
-        group.loc[group.index[-1], ['velocity', 'acceleration', 'yaw_rate']] = group.loc[group.index[-2], ['velocity', 'acceleration', 'yaw_rate']]
+        #group.loc[group.index[-1], ['velocity', 'acceleration','yaw_rate']] = group.loc[group.index[-2], ['velocity', 'acceleration','yaw_rate']]
         
         return group
 

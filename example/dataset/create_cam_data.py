@@ -104,7 +104,6 @@ class CamDataProcessor(BaseTableLoader):
                                             sample_detected_objects[cam_type][key] = 0
                                         sample_detected_objects[cam_type][key] += 1
 
-            #detected_objects.append((sample_token, sample_detected_objects))
             for cam_type in self.cameras:
                 sample_tokens.loc[sample_tokens['token'] == sample_token, f'{cam_type}'] = str(sample_detected_objects[cam_type])
 
@@ -113,6 +112,8 @@ class CamDataProcessor(BaseTableLoader):
         output_path = Path(self.dataoutput) / 'cam_detection.csv'
         df_detected_objects.to_csv(output_path, index=False)
         print(f"Camera detection data saved to {output_path}")
+        
+
 
 
     '''
