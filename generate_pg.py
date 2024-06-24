@@ -3,7 +3,6 @@ import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
 from example.discretizer.discretizer import AVDiscretizer
-from example.discretizer.discretizer_with_intentions import AVDiscretizerD1
 import pandas as pd
 
 if __name__ == '__main__':
@@ -11,7 +10,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', help='Input data folder of states and actions.', default=".")
     parser.add_argument('--file', help='Input data file name of states and actions.')
     parser.add_argument('--city', help='Specify city to consider when building the PG.', choices=['all', 'b','s1','s2', 's3'], default="all")
-    parser.add_argument('--discretizer', type=int, help='Specify the discretizer of the input data.', choices=[0, 1, 2, 3], default=0)
+    parser.add_argument('--discretizer', type=int, help='Specify the discretizer of the input data.', choices=[0, 1, 2], default=0)
     parser.add_argument('--output', help='Which format to output the Policy Graph',
                         default='csv', choices=['pickle', 'csv', 'gram'])
     parser.add_argument('--verbose', help='Whether to make the Policy Graph code output log statements or not',
@@ -51,7 +50,7 @@ if __name__ == '__main__':
  
     #TODO: update
     env = SelfDrivingEnvironment(city)
-    discretizer = {0: AVDiscretizer, 1: AVDiscretizerD1, 2: None, 3: None}[discretizer_id](env)
+    discretizer = {0: AVDiscretizer, 1: None, 2: None}[discretizer_id](env)
    
 
     df = pd.read_csv(Path(data_folder) / data_file, dtype=dtype_dict, parse_dates=['timestamp'])
@@ -63,17 +62,18 @@ if __name__ == '__main__':
     pg = PG.PolicyGraph(env, discretizer)
     pg = pg.fit(df, update=False, verbose=verbose)
         
-    
+    split = 'mini' if 'mini' in data_file else 'trainval'
+
     if output_format == 'csv':
-        nodes_path = f'example/dataset/data/policy_graphs/pg_C{city_id}_D{discretizer_id}_nodes.{output_format}'
-        edges_path = f'example/dataset/data/policy_graphs/pg_C{city_id}_D{discretizer_id}_edges.{output_format}'
-        traj_path = f'example/dataset/data/policy_graphs/pg_C{city_id}_D{discretizer_id}_traj.{output_format}'
+        nodes_path = f'example/dataset/data/policy_graphs/pg_{split}_C{city_id}_D{discretizer_id}_nodes.{output_format}'
+        edges_path = f'example/dataset/data/policy_graphs/pg_{split}_C{city_id}_D{discretizer_id}_edges.{output_format}'
+        traj_path = f'example/dataset/data/policy_graphs/pg_{split}_C{city_id}_D{discretizer_id}_traj.{output_format}'
         pg.save(output_format, [nodes_path, edges_path, traj_path])
     else:
-        pg.save(output_format, f'example/dataset/data/policy_graphs/pg_C{city_id}_D{discretizer_id}.{output_format}')
+        pg.save(output_format, f'example/dataset/data/policy_graphs/pg_{split}_C{city_id}_D{discretizer_id}.{output_format}')
 
 
     if verbose:
         print(f'Successfully generated Policy Graph with {len(pg.nodes)} nodes and {len(pg.edges)} edges.')
 
-    #python3 generate_pg.py --input /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --verbose --file train_v1.0-mini_lidar_0.csv --output csv --discretizer 1 --city 'b'
+    #python3 generate_pg.py --input /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --verbose --file train_v1.0-trainval_lidar_0.csv --output csv --discretizer 1 --city 'b'

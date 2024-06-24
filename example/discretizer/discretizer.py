@@ -1,8 +1,9 @@
 from example.dataset.utils import vector_angle
-from example.discretizer.utils import Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation, DetectedObject
+from example.discretizer.utils import Detection, DetectFrontLeft, DetectFront, DetectFrontRight, DetectLeft, DetectRight, DetectFront, DetectBack, Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation
 from example.environment import SelfDrivingEnvironment
 import numpy as np
-from typing import Tuple, List, Union
+from typing import Tuple, Union
+import ast
 from pgeon.discretizer import Discretizer, Predicate
 
 # this class is a discretizer for discretizers D0 (no cameras), D1 (with 2 cameras)
@@ -27,7 +28,22 @@ class AVDiscretizer(Discretizer):
         self.state_to_be_discretized = ['x', 'y', 'velocity', 'steering_angle', 'yaw'] 
         self.state_columns_for_action = ['velocity', 'acceleration', 'steering_angle']     
 
-    
+        self.DETECTION_CLASS_MAPPING = {
+        'CAM_FRONT_LEFT': DetectFrontLeft,
+        'CAM_FRONT_RIGHT': DetectFrontRight,
+        'CAM_LEFT': DetectLeft,
+        'CAM_RIGHT': DetectRight,
+        'CAM_FRONT': DetectFront,
+        'CAM_BACK': DetectBack
+        }
+        self.STR_TO_CLASS_MAPPING = {
+            'DetectFrontLeft': DetectFrontLeft,
+            'DetectFrontRight': DetectFrontRight,
+            'DetectLeft': DetectLeft,
+            'DetectRight': DetectRight,
+            'DetectFront': DetectFront,
+            'DetectBack': DetectBack
+        }
     
     @staticmethod
     def is_close(a, b, eps=0.1):
@@ -68,6 +84,24 @@ class AVDiscretizer(Discretizer):
             
     #        detected_predicates.append(Predicate(DetectedObject, [obj]))
     #    return detected_predicates
+
+    def discretize_detections(self, detections):
+        detected_predicates = []
+        for cam_type, objects in detections.items():
+            tot_count = 0
+            for (category, _), count in ast.literal_eval(objects).items():
+
+                #TODO: filter useful categories only.
+                if 'object' not in category:
+                    tot_count+=count
+            detection_class = self.DETECTION_CLASS_MAPPING.get(cam_type, None)
+            predicate = Predicate(
+                    detection_class,
+                    [detection_class(tot_count)]
+            )
+            detected_predicates.append(predicate)
+        return detected_predicates
+
 
 
     def discretize_steering_angle(self, steering_angle: float)->Rotation:
@@ -252,26 +286,29 @@ class AVDiscretizer(Discretizer):
         mov_predicate = Velocity[vel_str[:-2].split('(')[1]]
         rot_predicate = Rotation[rot_str[:-2].split('(')[1]]
 
-        #TODO: fix
-        if split_str[5:]:
+        predicates = [
+            Predicate(BlockProgress, [progress_predicate]),
+            Predicate(LanePosition, [position_predicate]),
+            Predicate(NextIntersection, [intersection_predicate]),
+            Predicate(Velocity, [mov_predicate]),
+            Predicate(Rotation, [rot_predicate])
+        ]
+        
+
+        if len(split_str) > 5:
             detected_predicates = []
-            for cam_detections in split_str[3:]:
-                cam_type = cam_detections[:-1].split('(')[1]#map(str.strip, cam_detections[:-2].split(','))
-                detected_predicates.append(Predicate(DetectedObject, [DetectedObject(cam_type)]))
-            return (Predicate(BlockProgress, [progress_predicate]),
-                        Predicate(LanePosition, [position_predicate]),
-                        Predicate(NextIntersection, [intersection_predicate]),
-                        Predicate(Velocity, [mov_predicate]),
-                        Predicate(Rotation, [rot_predicate]), *detected_predicates)
-        else: 
-            return (Predicate(BlockProgress, [progress_predicate]),
-                    Predicate(LanePosition, [position_predicate]),
-                        Predicate(NextIntersection, [intersection_predicate]),
-                        Predicate(Velocity, [mov_predicate]),
-                        Predicate(Rotation, [rot_predicate]))
+            for cam_detections in split_str[5:]:
+                
+                detection_class_str, count = cam_detections[:-1].split('(')
+                detection_class = self.STR_TO_CLASS_MAPPING.get(detection_class_str, None)
+                detected_predicates.append(Predicate(detection_class, [detection_class(count)]))
+            
+            predicates.extend(detected_predicates)
+
+        return tuple(predicates)
+
     
     
-    #TODO: TAKE INTO ACCOUNT DETECTIONS
     def nearest_state(self, state):
         og_block_progress, og_lane_position, og_next_intersection, og_velocity, og_angle, *detections = state
 
@@ -296,15 +333,17 @@ class AVDiscretizer(Discretizer):
         for r in Rotation:
             if r != og_angle.value:
                 yield og_block_progress, og_lane_position, og_velocity, Predicate(Rotation, r), *detections
-        
-        #TODO: fix
-        if len(detections)>0:
-            for objs in [(DetectedObject('CAM_FRONT'), DetectedObject()),
-                (DetectedObject('CAM_FRONT'), DetectedObject('CAM_BACK')),
-                (DetectedObject(), DetectedObject('CAM_BACK'))]:
-                if objs not in detections:
-                    yield og_block_progress, og_lane_position, og_velocity, og_angle, Predicate(DetectedObject, [objs[0]]), Predicate(DetectedObject, [objs[1]])
-            
+        if detections:
+            similar_detections = []
+            for cam_type in self.detection_cameras:      
+                detection_class = self.STR_TO_CLASS_MAPPING.get(cam_type, None)
+                for chunk in Detection.chunks:         
+                    similar_detections.append(Predicate(detection_class, [chunk])) #TODO: this will yield also a state equal to the current. To be fixed, Further idea: 0 is similar to 1-4 but not to 5+.
+            #print(*similar_detections)
+            print(f'detections: ')
+            print(*detections)
+            print(f'detection 0 value;: {detections[0].value}')
+            yield og_block_progress, og_lane_position, og_velocity, og_velocity, og_angle, *similar_detections         
         
 
         for b in BlockProgress:
@@ -330,7 +369,7 @@ class AVDiscretizer(Discretizer):
     def all_actions(self):
         return list(Action) 
         
-    #TODO: update
+    #TODO: update with detections
     def get_predicate_space(self):
         all_tuples = []
 
@@ -339,7 +378,8 @@ class AVDiscretizer(Discretizer):
                 for n in NextIntersection:
                     for v in Velocity:
                         for r in Rotation:
-                            ##for cam_type in self.detection_cameras.append(0):
-                            all_tuples.append((p,l,n,v,r))
+                            #for cam_type in self.detection_cameras:#.append(0):
+                                #all_tuples.append((p,l,n,v,r))
+                                all_tuples.append((p,l,n,v,r))
         return all_tuples
 

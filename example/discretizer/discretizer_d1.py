@@ -57,7 +57,7 @@ class AVDiscretizerD1(AVDiscretizer):
         'CAM_FRONT_RIGHT': DetectFrontRight,
         'CAM_LEFT': DetectLeft,
         'CAM_RIGHT': DetectRight,
-        'CAM_FRONT': DetectInFront,
+        'CAM_FRONT': DetectFront,
         'CAM_BACK': DetectBack
         }
         self.STR_TO_CLASS_MAPPING = {
@@ -65,7 +65,7 @@ class AVDiscretizerD1(AVDiscretizer):
             'DetectFrontRight': DetectFrontRight,
             'DetectLeft': DetectLeft,
             'DetectRight': DetectRight,
-            'DetectInFront': DetectInFront,
+            'DetectInFront': DetectFront,
             'DetectBack': DetectBack
         }
     

@@ -57,14 +57,14 @@ class NextIntersection(Enum):
 
 
 class Detection:
-    chunks = ["0", "1-4", "5+"]
+    chunks = ["0", "1-2", "3+"]
 
     def __init__(self, count=0):
         if isinstance(count, str):
             self.count = count
         elif count == 0:
             self.count = self.chunks[0]
-        elif count < 5:
+        elif count < 3:
             self.count = self.chunks[1]
         else:
             self.count = self.chunks[2]
@@ -97,6 +97,13 @@ class DetectLeft(Detection):
     pass
 
 
+class IsTrafficLightNearby(Enum):
+  YES = auto()
+  NO = auto()
+  
+  def __str__(self):
+        return f'{self.__class__.__name__}({self.name})'
+  
 
 '''
 class DetectedObject(): #0 or camera_type if any object is present

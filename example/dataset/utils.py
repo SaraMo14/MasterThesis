@@ -11,8 +11,37 @@ def vector_angle(v1, v2):
         magnitude_v2 = np.linalg.norm(v2)
         return np.arccos(dot_product / (magnitude_v1 * magnitude_v2))
 
+'''
+def get_tangent_vector(lane_record, closest_pose_idx_to_lane, threshold=0.2):
+    # Compute initial tangent vector
+    if closest_pose_idx_to_lane == len(lane_record) - 1:
+        tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+    else:
+        tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
 
-def calculate_direction_of_travel(tangent_vector, yaw, threshold=0):
+    tangent_vector_norm = np.linalg.norm(tangent_vector)
+
+    # Check if the norm is close to zero
+    if tangent_vector_norm <= threshold:
+        print("Initial tangent vector is zero or close to zero, recomputing...")
+        if closest_pose_idx_to_lane == 0:
+            tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+        elif closest_pose_idx_to_lane == len(lane_record) - 1:
+            tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+        else:
+            tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane - 1]
+
+        tangent_vector_norm = np.linalg.norm(tangent_vector)
+
+        if tangent_vector_norm <= threshold:
+            print("Uncertain direction due to zero tangent vector after recomputation")
+            return 0, tangent_vector
+
+    return tangent_vector_norm, tangent_vector
+'''
+
+
+def determine_travel_alignment(tangent_vector, yaw, threshold=0.001):
         """
         Calculate the direction of travel based on the tangent vector of the lane and the vehicle's yaw.
 
@@ -26,7 +55,6 @@ def calculate_direction_of_travel(tangent_vector, yaw, threshold=0):
         if tangent_vector_norm <= threshold: #to account for norms that are very close to zero but not exactly zero.
             print("Uncertain direction due to zero tangent vector")
             return 0
-        
         reference_direction_unit = tangent_vector / tangent_vector_norm
 
         # Compute the ego vehicle's heading direction vector

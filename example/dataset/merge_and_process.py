@@ -93,6 +93,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     processor = SceneDataProcessor(args.dataroot, args.dataoutput, args.version, args.key_frames, args.sensor, args.complexity)
+    
+    
+    
+ #python3 merge_and_process.py --dataroot 'data/sets/nuscenes' --dataoutput 'data/sets/nuscenes/' --version v1.0-mini --key_frame True --sensor lidar --complexity 0 --test_size 0.2
+
     processor.run_processing(args.test_size, args.random_state)
 
 #python3 merge_and_process.py --dataroot 'data/sets/nuscenes' --dataoutput 'data/sets/nuscenes/' --version v1.0-trainval --key_frame True --sensor lidar --complexity 0 --test_size 0.2

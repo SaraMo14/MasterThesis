@@ -4,7 +4,6 @@ import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
 from example.discretizer.discretizer import AVDiscretizer
-from example.discretizer.discretizer_with_intentions import AVDiscretizerD1
 import pandas as pd
 
 
@@ -22,7 +21,7 @@ if __name__ == '__main__':
                         choices=['random', 'similar_nodes'])     
     parser.add_argument('--discretizer', type=int, 
                         help='Specify the discretizer of the input data.', 
-                        choices=[0, 1, 2, 3], default=0)
+                        choices=[0, 1, 2], default=0)
     parser.add_argument('--city', 
                         help='Specify city to consider when testing the PG.', 
                         choices=['b','s1','s2', 's3'], 
@@ -69,43 +68,38 @@ if __name__ == '__main__':
 
 
 
-    if args.policy_mode == 'original':
-        pass
+    if args.policy_mode == 'greedy':
+        mode = PG.PGBasedPolicyMode.GREEDY
     else:
-        if args.policy_mode == 'greedy':
-            mode = PG.PGBasedPolicyMode.GREEDY
-        else:
-            mode = PG.PGBasedPolicyMode.STOCHASTIC
+        mode = PG.PGBasedPolicyMode.STOCHASTIC
 
-        if args.action_mode == 'random':
-            node_not_found_mode = PG.PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM
-        else:
-            node_not_found_mode = PG.PGBasedPolicyNodeNotFoundMode.FIND_SIMILAR_NODES
+    if args.action_mode == 'random':
+        node_not_found_mode = PG.PGBasedPolicyNodeNotFoundMode.RANDOM_UNIFORM
+    else:
+        node_not_found_mode = PG.PGBasedPolicyNodeNotFoundMode.FIND_SIMILAR_NODES
         
         
-        #load PG-based agent
-        nodes_path = f'example/dataset/data/policy_graphs/{training_id}_nodes.csv'
-        edges_path = f'example/dataset/data/policy_graphs/{training_id}_edges.csv'
+    #load PG-based agent
+    nodes_path = f'example/dataset/data/policy_graphs/{training_id}_nodes.csv'
+    edges_path = f'example/dataset/data/policy_graphs/{training_id}_edges.csv'
         
-        #TODO: update
-        environment = SelfDrivingEnvironment(city)
-        discretizer = {0: AVDiscretizer, 1: AVDiscretizerD1, 2: None, 3: None}[discretizer_id](environment)
+    environment = SelfDrivingEnvironment(city)
+    discretizer = {0: AVDiscretizer, 1: None, 2: None}[discretizer_id](environment)
 
-        pg = PG.PolicyGraph.from_nodes_and_edges(nodes_path, edges_path, environment, discretizer)
-        agent = PG.PGBasedPolicy(pg, mode, node_not_found_mode)
+    pg = PG.PolicyGraph.from_nodes_and_edges(nodes_path, edges_path, environment, discretizer)
+    agent = PG.PGBasedPolicy(pg, mode, node_not_found_mode)
     
-        if verbose:
-            print(f'Successfully loaded Policy Graph with {len(pg.nodes)} nodes and {len(pg.edges)} edges.')
-            print(f'Policy mode: {args.policy_mode}')
-            print(f'Node not found mode: {node_not_found_mode}')
-            print()
+    if verbose:
+        print(f'Successfully loaded Policy Graph with {len(pg.nodes)} nodes and {len(pg.edges)} edges.')
+        print(f'Policy mode: {args.policy_mode}')
+        print(f'Node not found mode: {node_not_found_mode}')
+        print()
 
-        avg_nll_action, std_nll_action, avg_nll_world, std_nll_world = agent.compute_static_metrics(test_set=test_df, verbose = verbose)
-        
-
-        #with open(f'example/dataset/data/rewards/rewards_{args.policy_mode}.csv', 'w+') as f:
-        #    csv_w = csv.writer(f)
-        #    csv_w.writerow(tot_reward)
+    original_agent = True if args.policy_mode == 'original' else False
+    avg_nll_action, std_nll_action, avg_nll_world, std_nll_world = agent.compute_static_metrics(test_set=test_df, verbose = verbose, original_agent=original_agent)
+    #with open(f'example/dataset/data/rewards/rewards_{args.policy_mode}.csv', 'w+') as f:
+    #    csv_w = csv.writer(f)
+    #    csv_w.writerow(tot_reward)
 
  
 
@@ -118,16 +112,6 @@ if __name__ == '__main__':
 
     
     #TODO specify test_city
-
-   
-    #tot_reward, reached_destination = env.compute_total_reward(agent, disc_initial_state, disc_final_state, max_steps=600)
-    
-    #print(f'Average NLL Interpretability/Reliability of actions: {nll_policy}')
-    #print(f'Average NLL Interpretability/Reliability of world model: {nll_world}')
-
-    #with open(f'example/dataset/data/rewards/rewards_{args.policy_mode}.csv', 'w+') as f:
-    #    csv_w = csv.writer(f)
-    #    csv_w.writerow(tot_reward)
-    
+  
     
     #python3 test_pg.py --training_id pg_Call_D0 --test_set 'test_v1.0-mini_lidar_0.csv' --policy-mode greedy --action-mode random --discretizer 0 --city 'b' --verbose

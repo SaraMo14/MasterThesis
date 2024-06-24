@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import math
-from example.dataset.utils import create_rotated_rectangle, calculate_direction_of_travel
+from example.dataset.utils import create_rotated_rectangle, determine_travel_alignment
 from typing import Tuple, List
 
 class SelfDrivingEnvironment(Environment):
@@ -23,7 +23,6 @@ class SelfDrivingEnvironment(Environment):
 
         self.current_state = None
 
-        #self.threshold_distance = 8 #meters of distance within detecting traffic lights
         #TODO: change based on velocity, start slowing down before
 
     
@@ -100,14 +99,14 @@ class SelfDrivingEnvironment(Environment):
         if render_egoposes:
             ax.scatter(map_poses[:, 0], map_poses[:, 1], s=20, c='k', alpha=1.0, zorder=2)
         plt.axis('off')
-
+        print('f')
         #if out_path is not None:
-        #plt.savefig(f'example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
+        plt.savefig(f'/example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
         #plt.close(fig)
 
         #return map_poses, fig, ax
 
-    def render_ego_on_patch(self,x,y,yaw, patch_size=20, non_geometric_layers:List[str]=['road_divider', 'lane_divider']):
+    def render_ego_on_patch(self,x,y,yaw, patch_size=20, non_geometric_layers:List[str]=['road_divider', 'lane_divider'], agent_size = (2,4)):
 
         patch_box = [x,y, patch_size, patch_size]
         patch = NuScenesMapExplorer.get_patch_coord(patch_box)
@@ -117,7 +116,7 @@ class SelfDrivingEnvironment(Environment):
             
         ax.scatter(x,y)
         yaw =  math.degrees(-(math.pi / 2) + yaw)
-        rotated_rectangle = create_rotated_rectangle((x,y), yaw, (2,4))
+        rotated_rectangle = create_rotated_rectangle((x,y), yaw,agent_size)
         x,y = rotated_rectangle.exterior.xy
         ax.plot(x,y,linewidth=0.2)
         
@@ -212,28 +211,6 @@ class SelfDrivingEnvironment(Environment):
 
 
 
-    def is_near_traffic_light(self, x,y):
-        """
-        Check if there is a traffic light nearby the given pose (x, y).
-
-        Args:
-            x (float): Current x-coordinate of the vehicle.
-            y (float): Current y-coordinate of the vehicle.
-
-        Returns:
-            dict: Information about the nearby traffic light (if any), or None.
-        """
-        for traffic_light in self.nusc_map.traffic_light:
-            traffic_light_x = traffic_light['pose']['tx']
-            traffic_light_y = traffic_light['pose']['ty']
-            distance = np.sqrt((x - traffic_light_x)**2 + (y - traffic_light_y)**2)
-            
-            if distance <=self.threshold_distance:
-                return self.get_traffic_light_status(traffic_light)
-        
-        return None
-    
-
 
     def reach_drivable_area(self, x,y, radius:float=5, resolution_meters:float = 0.5):
         """
@@ -270,33 +247,69 @@ class SelfDrivingEnvironment(Environment):
         return closest_pose
     
 
-    def apply_brakes(self):
-        pass
 
-    def detect_pedestrian_crossing(self, x,y):
-        pass
+    
    
-    def check_collision(self, state, object_type):
-        pass
+
+
+    ###################################
+    #PROCESS NEARBY OBJECTS INFORMATION
+    ###################################
+
+    def is_near_pedestrian(self, x,y, radius:float=8):
+            pass
+    
+
+
+    '''
+    def is_near_traffic_light(self, x,y, radius:float=8):
+        """
+        Check if there is a traffic light nearby the given pose (x, y).
+
+        Args:
+            x (float): Current x-coordinate of the vehicle.
+            y (float): Current y-coordinate of the vehicle.
+
+        Returns:
+            True or False (TODO return dict: Information about the nearby traffic light (if any))
+        """
+        current_road_block = self.nusc_map.record_on_point(x, y, 'lane') 
+        
+        if current_road_block:
+
+            for traffic_light in self.nusc_map.traffic_light:
+                traffic_light_x = traffic_light['pose']['tx']
+                traffic_light_y = traffic_light['pose']['ty']
+                road_block_affected = traffic_light['from_road_block_tokens']
+                print(f'current_road_block{current_road_block}')
+                print(f'road_block_affected{road_block_affected}')
+                if road_block_affected == current_road_block:
+
+                    distance = np.sqrt((x - traffic_light_x)**2 + (y - traffic_light_y)**2)
+                    
+                    if distance <=radius:
+                        return True#self.get_traffic_light_status(traffic_light)
+        
+        return False
+        '''
+
+    def is_near_stop_line(self,x,y, radius:float = 8):
+        '''
+        Function to check if car is near a stop line.
+        
+        '''
+        is_stop_line = self.nusc_map.record_on_point(x, y, 'stop_line')
+        if len(is_stop_line)>0:
+            return True 
+        return False
+    
+
 
     #########################
     #PROCESS LANE INFORMATION
     #########################
 
-    def is_near_stop_line(self,x,y):
-        '''
-        Function to check if car is near a stop line.
-        Check also if a traffic light is nearby.
-        #TODO: slow down gradually when approaching this parts of the environemnt.
-        '''
-        is_stop_line = self.nusc_map.record_on_point(x, y, 'stop_line')
-        if len(is_stop_line)>0:
-
-            return True #TODO: the action keeps the same, so if it was GAS it will keep being gas but with 0,0,0 state values
-        
-        return False
-    
-       
+      
     def is_on_divider(self, x,y, yaw, agent_size:Tuple[float, float]) -> bool:
         """
         Checks whether the ego vehicle interescts lane and road dividers
@@ -373,7 +386,7 @@ class SelfDrivingEnvironment(Environment):
                 else:
                     tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
 
-                direction_of_travel = calculate_direction_of_travel(tangent_vector, yaw)
+                direction_of_travel = determine_travel_alignment(tangent_vector, yaw)
 
                 if direction_of_travel <-eps:
                     return(BlockProgress.INTERSECTION, LanePosition.LEFT)
@@ -381,13 +394,12 @@ class SelfDrivingEnvironment(Environment):
                     return(BlockProgress.INTERSECTION,LanePosition.RIGHT)
                 else:
                     return(BlockProgress.INTERSECTION,LanePosition.NONE) 
-                    #TODO: fix tangent vector close to zero, meaning 2 points in the asrcline path are very close
-                    #Possible fix: use prev or next points.
-        
+                    
         block_progress = None
         lane_position = None
-                
-        #closest_lane = self.nusc_map.get_closest_lane(x, y, radius=2)                    
+        
+        if not current_lane:
+            current_lane = self.nusc_map.get_closest_lane(x, y, radius=2)                   
         lane = self.nusc_map.get_arcline_path(current_lane)
         closest_pose_idx_to_lane, lane_record, distance_along_lane = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane)
 
@@ -412,7 +424,7 @@ class SelfDrivingEnvironment(Environment):
             else:
                 tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
 
-            direction_of_travel = calculate_direction_of_travel(tangent_vector, yaw)
+            direction_of_travel = determine_travel_alignment(tangent_vector, yaw)
                     
             if direction_of_travel <-eps:
                 #print("Opposite to travel direction of lane")
@@ -422,8 +434,9 @@ class SelfDrivingEnvironment(Environment):
                 lane_position = LanePosition.RIGHT
             else: 
                 #print("Uncertain direction")
-                lane_position = LanePosition.NONE #TODO: fix
-
+                lane_position = LanePosition.NONE #TODO: fix tangent vector close to zero, meaning 2 points in the asrcline path are very close
+                #Possible fix: use prev or next points.
+        
         return (block_progress, lane_position)
         
             

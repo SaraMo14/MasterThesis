@@ -19,9 +19,11 @@ class CANDataProcessor(BaseTableLoader):
         self.dataroot = dataroot
         self.dataoutput = dataoutput
         self.version = version
-        #self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
         self.nusc_can = NuScenesCanBus(dataroot=Path(dataroot))
 
+        self.blacklist = [499, 515, 517, 501, 502, 161, 162, 163, 164, 165, 166, 167, 168, 170, 171, 172, 173, 174, 175, 176, 309, 310, 311, 312, 313, 314] #scenes with wrong route/ego poses
+        
+        
 
         assert osp.exists(self.table_root), 'Database version not found: {}'.format(self.table_root)
 
@@ -43,7 +45,7 @@ class CANDataProcessor(BaseTableLoader):
         scene = pd.DataFrame(self.scene)[['token', 'name', 'log_token']].rename(columns={'token': 'scene_token'})
         sample = pd.DataFrame(self.sample)[['token', 'timestamp', 'scene_token']].rename(columns={'token': 'sample_token', 'timestamp': 'utime'}).merge(scene, on='scene_token')
 
-        valid_scene_names = [name for name in scene['name'] if int(name[-4:]) not in self.nusc_can.can_blacklist]
+        valid_scene_names = [name for name in scene['name'] if int(name[-4:]) not in self.blacklist]
         merged_CAN_data_list = []
 
         for scene_name in valid_scene_names:
