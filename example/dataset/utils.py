@@ -1,6 +1,7 @@
 import numpy as np
 from nuscenes.prediction import convert_global_coords_to_local
 import pandas as pd
+import math
 from shapely.geometry import Polygon
 from shapely import affinity
 
@@ -65,19 +66,22 @@ def determine_travel_alignment(tangent_vector, yaw, threshold=0.001):
 
         return dot_product
 
-def create_rotated_rectangle(center, yaw,size):
+
+def create_rotated_rectangle(center, yaw, size, shift_distance=0):
     """
-    Create a rotated rectangle as a Shapely Polygon.
+    Create a rotated rectangle as a Shapely Polygon with an option to shift its center up.
 
     :param center (tuple): (x, y) coordinates of the rectangle's center.
     :param yaw (float): Rotation angle in degrees.
     :param size (tuple): (width, height) of the rectangle's size.
+    :param shift_distance (float): Amount to shift the center in the direction of rotation.
 
-    :return Polygon: A Shapely Polygon representing the rotated rectangle.
+    :return Polygon: A Shapely Polygon representing the rotated and shifted rectangle.
     """
     x, y = center
     width, height = size
 
+    # Define the initial rectangle vertices based on the center
     rectangle = Polygon([
         (x - width / 2, y - height / 2),
         (x + width / 2, y - height / 2),
@@ -85,8 +89,24 @@ def create_rotated_rectangle(center, yaw,size):
         (x - width / 2, y + height / 2)
     ])
 
+    # Rotate the rectangle around its center
     rotated_rectangle = affinity.rotate(rectangle, yaw, origin='center', use_radians=False)
-    return rotated_rectangle
+    if shift_distance == 0:
+         return rotated_rectangle
+    else:
+        # Calculate the shift in the local coordinate system after rotation
+        yaw_radians = math.radians(yaw)
+        shift_x = -shift_distance * math.sin(yaw_radians)
+        shift_y = shift_distance * math.cos(yaw_radians)
+
+        # Translate the rotated rectangle in the direction of rotation
+        shifted_rectangle = affinity.translate(rotated_rectangle, xoff=shift_x, yoff=shift_y)
+
+        return shifted_rectangle
+
+
+
+
 
 def velocity(current_translation, prev_translation, time_diff: float) -> float:
     """

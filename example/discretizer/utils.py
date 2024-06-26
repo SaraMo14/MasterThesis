@@ -103,8 +103,26 @@ class IsTrafficLightNearby(Enum):
   
   def __str__(self):
         return f'{self.__class__.__name__}({self.name})'
+
+
+class IsZebraNearby(Enum):
+  #includes pedestrian crossing and turn stop
+  YES = auto()
+  NO = auto()
+  
+  def __str__(self):
+        return f'{self.__class__.__name__}({self.name})'
   
 
+
+class IsStopSignNearby(Enum): 
+  #includes Stop Sign and Yield Sign
+  YES = auto()
+  NO = auto()
+  
+  def __str__(self):
+        return f'{self.__class__.__name__}({self.name})'
+  
 '''
 class DetectedObject(): #0 or camera_type if any object is present
     def __init__(self, cam_type=None):

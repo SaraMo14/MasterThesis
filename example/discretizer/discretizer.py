@@ -10,7 +10,8 @@ from pgeon.discretizer import Discretizer, Predicate
 
 class AVDiscretizer(Discretizer):
     def __init__(self, environment: SelfDrivingEnvironment):
-        super(AVDiscretizer, self).__init__()
+        #super(AVDiscretizer, self).__init__()
+        super().__init__()
 
         self.enviroment = environment
 

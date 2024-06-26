@@ -10,6 +10,7 @@ from datetime import datetime
 import math
 from example.dataset.utils import create_rotated_rectangle, determine_travel_alignment
 from typing import Tuple, List
+from shapely.geometry import Point
 
 class SelfDrivingEnvironment(Environment):
 
@@ -106,7 +107,7 @@ class SelfDrivingEnvironment(Environment):
 
         #return map_poses, fig, ax
 
-    def render_ego_on_patch(self,x,y,yaw, patch_size=20, non_geometric_layers:List[str]=['road_divider', 'lane_divider'], agent_size = (2,4)):
+    def render_ego_on_patch(self,x,y,yaw, patch_size=20, non_geometric_layers:List[str]=['road_divider', 'lane_divider'], agent_size = (2,4), shift_distance=0):
 
         patch_box = [x,y, patch_size, patch_size]
         patch = NuScenesMapExplorer.get_patch_coord(patch_box)
@@ -116,9 +117,9 @@ class SelfDrivingEnvironment(Environment):
             
         ax.scatter(x,y)
         yaw =  math.degrees(-(math.pi / 2) + yaw)
-        rotated_rectangle = create_rotated_rectangle((x,y), yaw,agent_size)
+        rotated_rectangle = create_rotated_rectangle((x,y), yaw,agent_size,shift_distance)
         x,y = rotated_rectangle.exterior.xy
-        ax.plot(x,y,linewidth=0.2)
+        ax.plot(x,y,linewidth=0.3)
         
 
         # Plot the heading vector
@@ -180,6 +181,7 @@ class SelfDrivingEnvironment(Environment):
     ## PROCESS ENVIRONEMNT 
     ########################
 
+    '''
     def process_environment(self, x, y, speed, yaw_rate, accel, yaw, steering_angle):
         """
         Processes environmental information to adjust vehicle behavior.
@@ -209,7 +211,7 @@ class SelfDrivingEnvironment(Environment):
         
         return x,y
 
-
+    '''
 
 
     def reach_drivable_area(self, x,y, radius:float=5, resolution_meters:float = 0.5):
@@ -262,46 +264,50 @@ class SelfDrivingEnvironment(Environment):
 
 
     '''
-    def is_near_traffic_light(self, x,y, radius:float=8):
+    def is_near_traffic_light(self, x,y, yaw, box_size=(15,40), eps=0.1):
+        #15: beacuse i want it to be large enough to capture semaphors of other lanes of the same road. or on the side 
+        #30: because
+        #eps
         """
         Check if there is a traffic light nearby the given pose (x, y).
 
         Args:
             x (float): Current x-coordinate of the vehicle.
             y (float): Current y-coordinate of the vehicle.
+            yaw (float): Yaw angle of the vehicle in radians.
+            eps (float): Epsilon value for alignment tolerance
 
         Returns:
-            True or False (TODO return dict: Information about the nearby traffic light (if any))
+            bool: True if a traffic light is nearby and aligned with the vehicle's direction of travel, False otherwise.
+            (TODO return dict: Information about the nearby traffic light (if any))
+        
         """
-        current_road_block = self.nusc_map.record_on_point(x, y, 'lane') 
-        
-        if current_road_block:
 
-            for traffic_light in self.nusc_map.traffic_light:
-                traffic_light_x = traffic_light['pose']['tx']
-                traffic_light_y = traffic_light['pose']['ty']
-                road_block_affected = traffic_light['from_road_block_tokens']
-                print(f'current_road_block{current_road_block}')
-                print(f'road_block_affected{road_block_affected}')
-                if road_block_affected == current_road_block:
-
-                    distance = np.sqrt((x - traffic_light_x)**2 + (y - traffic_light_y)**2)
+        # Create a rotated rectangle around the vehicle's current pose
+        yaw_in_deg =  math.degrees(-(math.pi / 2) + yaw)
+        rotated_rectangle = create_rotated_rectangle((x,y), yaw_in_deg, box_size, shift_distance=15)
+        for traffic_light in self.nusc_map.traffic_light:
+                line = self.nusc_map.extract_line(traffic_light['line_token'])
+                if line.is_empty:  # Skip lines without nodes
+                    continue
+                xs, ys = line.xy
+                point = Point(xs[0], ys[0])# Traffic light is represented as a line, we take the starting point
+                
+                if point.within(rotated_rectangle):
                     
-                    if distance <=radius:
-                        return True#self.get_traffic_light_status(traffic_light)
-        
+                    traffic_light_direction = (xs[1] - xs[0], ys[1] - ys[0])
+                    
+                    alignment = determine_travel_alignment(traffic_light_direction, yaw)
+                    eps = 0.5 #explain why not 0.1
+                    if alignment <eps:#-eps:
+                        return True
+                
         return False
         '''
 
-    def is_near_stop_line(self,x,y, radius:float = 8):
-        '''
-        Function to check if car is near a stop line.
-        
-        '''
-        is_stop_line = self.nusc_map.record_on_point(x, y, 'stop_line')
-        if len(is_stop_line)>0:
-            return True 
-        return False
+
+
+
     
 
 
