@@ -42,7 +42,7 @@ def get_tangent_vector(lane_record, closest_pose_idx_to_lane, threshold=0.2):
 '''
 
 
-def determine_travel_alignment(tangent_vector, yaw, threshold=0.001):
+def determine_travel_alignment(direction_vector, yaw, threshold=0.001):
         """
         Calculate the direction of travel based on the tangent vector of the lane and the vehicle's yaw.
 
@@ -52,11 +52,11 @@ def determine_travel_alignment(tangent_vector, yaw, threshold=0.001):
         :return: 1 if in travel direction, -1 if opposite, 0 if uncertain.
         """
         # Normalize the tangent vector
-        tangent_vector_norm = np.linalg.norm(tangent_vector)
-        if tangent_vector_norm <= threshold: #to account for norms that are very close to zero but not exactly zero.
+        direction_vector_norm = np.linalg.norm(direction_vector)
+        if direction_vector_norm <= threshold: #to account for norms that are very close to zero but not exactly zero.
             print("Uncertain direction due to zero tangent vector")
             return 0
-        reference_direction_unit = tangent_vector / tangent_vector_norm
+        reference_direction_unit = direction_vector / direction_vector_norm
 
         # Compute the ego vehicle's heading direction vector
         heading_vector = np.array([np.cos(yaw), np.sin(yaw)])

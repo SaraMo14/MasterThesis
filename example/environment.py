@@ -100,9 +100,9 @@ class SelfDrivingEnvironment(Environment):
         if render_egoposes:
             ax.scatter(map_poses[:, 0], map_poses[:, 1], s=20, c='k', alpha=1.0, zorder=2)
         plt.axis('off')
-        print('f')
+        
         #if out_path is not None:
-        plt.savefig(f'/example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
+        #plt.savefig(f'/example/renderings/ego_poses_{datetime.now()}.png', bbox_inches='tight', pad_inches=0)
         #plt.close(fig)
 
         #return map_poses, fig, ax
@@ -388,11 +388,11 @@ class SelfDrivingEnvironment(Environment):
                 lane_path = self.nusc_map.get_arcline_path(closest_lane)
                 closest_pose_idx_to_lane, lane_record, _ = SelfDrivingEnvironment.project_pose_to_lane((x, y, yaw), lane_path)
                 if closest_pose_idx_to_lane == len(lane_record) - 1:
-                    tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+                    direction_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
                 else:
-                    tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+                    direction_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
 
-                direction_of_travel = determine_travel_alignment(tangent_vector, yaw)
+                direction_of_travel = determine_travel_alignment(direction_vector, yaw)
 
                 if direction_of_travel <-eps:
                     return(BlockProgress.INTERSECTION, LanePosition.LEFT)
@@ -426,11 +426,11 @@ class SelfDrivingEnvironment(Environment):
             lane_position = LanePosition.CENTER
         else:
             if closest_pose_idx_to_lane == len(lane_record) - 1:
-                tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
+                direction_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1]
             else:
-                tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
+                direction_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
 
-            direction_of_travel = determine_travel_alignment(tangent_vector, yaw)
+            direction_of_travel = determine_travel_alignment(direction_vector, yaw)
                     
             if direction_of_travel <-eps:
                 #print("Opposite to travel direction of lane")
@@ -440,7 +440,7 @@ class SelfDrivingEnvironment(Environment):
                 lane_position = LanePosition.RIGHT
             else: 
                 #print("Uncertain direction")
-                lane_position = LanePosition.NONE #TODO: fix tangent vector close to zero, meaning 2 points in the asrcline path are very close
+                lane_position = LanePosition.NONE #TODO: fix direction vector close to zero, meaning 2 points in the asrcline path are very close
                 #Possible fix: use prev or next points.
         
         return (block_progress, lane_position)

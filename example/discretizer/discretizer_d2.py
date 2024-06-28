@@ -1,4 +1,4 @@
-from example.discretizer.utils import Velocity, Rotation, IsTrafficLightNearby
+from example.discretizer.utils import Velocity, Rotation, IsTrafficLightNearby,IsZebraNearby,IsStopSignNearby
 from example.discretizer.discretizer import AVDiscretizer
 from example.environment import SelfDrivingEnvironment
 from pgeon.discretizer import Predicate
@@ -16,11 +16,14 @@ class AVDiscretizerD1(AVDiscretizer):
     ##################################
 
 
-    def discretize_traffic_light(self, x,y,yaw):
-        is_near_traffic_light = self.environment.is_near_traffic_light( x,y,yaw)
-        return IsTrafficLightNearby.YES  if is_near_traffic_light else IsTrafficLightNearby.NO
+    def discretize_stop_line(self, x,y,yaw):
+        is_sign_nearby, is_zebra_nearby, is_traffic_light_nearby = self.environment.nearby_stop_lines( x,y,yaw)
+        
+        is_sign_nearby = IsStopSignNearby.YES  if is_sign_nearby else IsStopSignNearby.NO
+        is_zebra_nearby = IsZebraNearby.YES  if is_zebra_nearby else IsZebraNearby.NO
+        is_traffic_light_nearby = IsTrafficLightNearby.YES  if is_traffic_light_nearby else IsTrafficLightNearby.NO
 
-
+        return is_sign_nearby, is_zebra_nearby, is_traffic_light_nearby
 
 
     ##################################
@@ -32,8 +35,8 @@ class AVDiscretizerD1(AVDiscretizer):
         predicates = super().discretize(state, detections)
 
         x, y, velocity, steer_angle, yaw = state 
-        traffic_light_predicate = self.discretize_traffic_light(x,y,yaw)
-        return (Predicate(IsTrafficLightNearby, [traffic_light_predicate]),) + predicates
+        stop_sign_predicate, zebra_predicate, traffic_light_predicate = self.discretize_traffic_light(x,y,yaw)
+        return (Predicate(IsStopSignNearby, [stop_sign_predicate]), Predicate(IsZebraNearby,[zebra_predicate]), Predicate(IsTrafficLightNearby, [traffic_light_predicate])) + predicates
 
     
     def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
