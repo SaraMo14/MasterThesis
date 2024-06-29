@@ -1,5 +1,5 @@
 from example.dataset.utils import vector_angle
-from example.discretizer.utils import Detection, DetectFrontLeft, DetectFront, DetectFrontRight, DetectLeft, DetectRight, DetectFront, DetectBack, Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation
+from example.discretizer.utils import Detection, FrontLeftObjects, FrontObjects, FrontRightObjects, LeftObjects, RightObjects, FrontObjects, BackObjects, Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation
 from example.environment import SelfDrivingEnvironment
 import numpy as np
 from typing import Tuple, Union
@@ -30,20 +30,20 @@ class AVDiscretizer(Discretizer):
         self.state_columns_for_action = ['velocity', 'acceleration', 'steering_angle']     
 
         self.DETECTION_CLASS_MAPPING = {
-        'CAM_FRONT_LEFT': DetectFrontLeft,
-        'CAM_FRONT_RIGHT': DetectFrontRight,
-        'CAM_LEFT': DetectLeft,
-        'CAM_RIGHT': DetectRight,
-        'CAM_FRONT': DetectFront,
-        'CAM_BACK': DetectBack
+        'CAM_FRONT_LEFT': FrontLeftObjects,
+        'CAM_FRONT_RIGHT': FrontRightObjects,
+        'CAM_LEFT': LeftObjects,
+        'CAM_RIGHT': RightObjects,
+        'CAM_FRONT': FrontObjects,
+        'CAM_BACK': BackObjects
         }
         self.STR_TO_CLASS_MAPPING = {
-            'DetectFrontLeft': DetectFrontLeft,
-            'DetectFrontRight': DetectFrontRight,
-            'DetectLeft': DetectLeft,
-            'DetectRight': DetectRight,
-            'DetectFront': DetectFront,
-            'DetectBack': DetectBack
+            'DetectFrontLeft': FrontLeftObjects,
+            'DetectFrontRight': FrontRightObjects,
+            'DetectLeft': LeftObjects,
+            'DetectRight': RightObjects,
+            'DetectFront': FrontObjects,
+            'DetectBack': BackObjects
         }
     
     @staticmethod

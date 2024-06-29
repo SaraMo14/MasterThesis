@@ -78,23 +78,30 @@ class Detection:
     def __hash__(self):
         return hash(self.count)
 
-class DetectFront(Detection):
+class FrontObjects(Detection):
     pass
 
-class DetectBack(Detection):
+class BackObjects(Detection):
     pass
 
-class DetectFrontRight(Detection):
+class FrontRightObjects(Detection):
     pass
 
-class DetectFrontLeft(Detection):
+class FrontLeftObjects(Detection):
     pass
 
-class DetectRight(Detection):
+class RightObjects(Detection):
     pass
 
-class DetectLeft(Detection):
+class LeftObjects(Detection):
     pass
+
+
+
+
+
+
+
 
 
 class IsTrafficLightNearby(Enum):

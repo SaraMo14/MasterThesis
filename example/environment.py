@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import math
-from example.dataset.utils import create_rotated_rectangle, determine_travel_alignment
+from example.dataset.utils import create_rectangle,create_semi_circle, create_semi_ellipse, determine_travel_alignment
 from typing import Tuple, List
 from shapely.geometry import Point
 
@@ -51,6 +51,51 @@ class SelfDrivingEnvironment(Environment):
     ### RENDERING
     #######################
 
+    
+    def render_ego_influent_area(self, x,y,yaw, patch_size=20, non_geometric_layers=['road_divider', 'lane_divider'], shape='rectangle', size = (14,20), shift_distance = 10, radius=8):
+        
+        """
+        Render the ego vehicle's influent area on a map.
+
+        :param x: x-coordinate of the ego vehicle's position.
+        :param y: y-coordinate of the ego vehicle's position.
+        :param yaw: Orientation of the ego vehicle in radians.
+        :param patch_size: Size of the patch to render.
+        :param non_geometric_layers: List of non-geometric layers to render (default includes 'road_divider' and 'lane_divider').
+        :param shape: Shape of the influent area (rectangle, semi_circle or semi_ellipse).
+        :param shape: (width,length) of the rectangle if shape is 'rectangle'
+        :param shift_distance: Distance to shift the center of the shape in the direction of yaw.
+        :param radius: Radius of the semi-circle if shape is 'semi_circle'. (radius_x, radius_y) in shape is 'semi_ellipse'
+
+        """
+        patch_box = [x,y, patch_size, patch_size]
+        patch = NuScenesMapExplorer.get_patch_coord(patch_box)
+        minx, miny, maxx, maxy = patch.bounds
+        
+        fig, ax = self.nusc_map.render_map_patch( [minx, miny, maxx, maxy], non_geometric_layers, figsize=(4, 4), render_egoposes_range=False)
+            
+        ax.scatter(x,y, color='red')
+        yaw_in_deg =  math.degrees(-(math.pi / 2) + yaw)
+        
+        if shape == 'rectangle':
+                front_area = create_rectangle((x,y), yaw_in_deg,size, shift_distance)
+        elif shape == 'semi_circle':
+                front_area = create_semi_circle((x,y), yaw_in_deg, radius)
+        else:# shape == 'semi_ellipse':
+                front_area = create_semi_ellipse((x,y), yaw_in_deg, radius)
+        x,y = front_area.exterior.xy
+        ax.plot(x,y,linewidth=0.4, color='red')
+
+        
+
+        plt.title('Plot for ego vehicle influent area')
+        plt.show()   
+    
+    
+    
+    
+    
+    
     def render_egoposes_on_fancy_map(self, map_poses:list = [], 
                                      verbose: bool = True,
                                      #out_path: str = None,
@@ -107,33 +152,6 @@ class SelfDrivingEnvironment(Environment):
 
         #return map_poses, fig, ax
 
-    def render_ego_on_patch(self,x,y,yaw, patch_size=20, non_geometric_layers:List[str]=['road_divider', 'lane_divider'], agent_size = (2,4), shift_distance=0):
-
-        patch_box = [x,y, patch_size, patch_size]
-        patch = NuScenesMapExplorer.get_patch_coord(patch_box)
-        minx, miny, maxx, maxy = patch.bounds
-        
-        fig, ax = self.nusc_map.render_map_patch( [minx, miny, maxx, maxy], non_geometric_layers, figsize=(5, 5))
-            
-        ax.scatter(x,y)
-        yaw =  math.degrees(-(math.pi / 2) + yaw)
-        rotated_rectangle = create_rotated_rectangle((x,y), yaw,agent_size,shift_distance)
-        x,y = rotated_rectangle.exterior.xy
-        ax.plot(x,y,linewidth=0.3)
-        
-
-        # Plot the heading vector
-        #ax.quiver(x, y, heading_vector[0], heading_vector[1], color='r', scale=5, label='Ego direction')
-
-        # Plot the tangent vector
-        #closest_point = lane_record[closest_pose_idx_to_lane]
-        #ax.quiver(closest_point[0], closest_point[1], tangent_vector[0], tangent_vector[1], color='b', scale=5, label='Lane direction')
-        #ax.legend()
-
-        plt.title('Plot for ego vehicle direction')
-        plt.show()   
-    
-
 
     def render_rectangle_agent_scene(self, x,y,yaw, agent_size=(2,4)):
             #render agent as a rectangle and show its heading direction vector compared to the direction of the lane, for each sample in the scene.
@@ -171,12 +189,15 @@ class SelfDrivingEnvironment(Environment):
             heading_vector = np.array([np.cos(yaw), np.sin(yaw)])
 
             yaw =  math.degrees(-(math.pi / 2) + yaw)
-            rotated_rectangle = create_rotated_rectangle((x,y), yaw, agent_size)
+            rotated_rectangle = create_rectangle((x,y), yaw, agent_size)
             ax.quiver(x, y, heading_vector[0], heading_vector[1], color='b', scale=10, label='Ego Direction')
             ax.quiver(x,y, tangent_vector[0], tangent_vector[1],  color='r', scale=10, label='Lane Direction')
             x,y = rotated_rectangle.exterior.xy
             ax.plot(x,y)
 
+    
+    
+    
     ########################
     ## PROCESS ENVIRONEMNT 
     ########################

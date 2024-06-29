@@ -2,8 +2,9 @@ import numpy as np
 from nuscenes.prediction import convert_global_coords_to_local
 import pandas as pd
 import math
-from shapely.geometry import Polygon
-from shapely import affinity
+from shapely.geometry import Polygon, Point, LineString
+from shapely.affinity import scale, rotate,translate
+
 
 def vector_angle(v1, v2):
         """Calculate the angle between two vectors."""
@@ -44,17 +45,17 @@ def get_tangent_vector(lane_record, closest_pose_idx_to_lane, threshold=0.2):
 
 def determine_travel_alignment(direction_vector, yaw, threshold=0.001):
         """
-        Calculate the direction of travel based on the tangent vector of the lane and the vehicle's yaw.
+        Calculate the direction of travel based on the direction vector of the lane and the vehicle's yaw.
 
-        :param tangent_vector: The tangent vector of the lane at the closest point.
+        :param direction_vector: The direction vector of the lane at the closest point.
         :param yaw: The yaw angle of the vehicle in radians.
         :param eps: A small threshold to determine if the vehicle is perpendicular to the lane.
         :return: 1 if in travel direction, -1 if opposite, 0 if uncertain.
         """
-        # Normalize the tangent vector
+        # Normalize the direction vector
         direction_vector_norm = np.linalg.norm(direction_vector)
         if direction_vector_norm <= threshold: #to account for norms that are very close to zero but not exactly zero.
-            print("Uncertain direction due to zero tangent vector")
+            print("Uncertain direction due to null direction vector")
             return 0
         reference_direction_unit = direction_vector / direction_vector_norm
 
@@ -67,7 +68,69 @@ def determine_travel_alignment(direction_vector, yaw, threshold=0.001):
         return dot_product
 
 
-def create_rotated_rectangle(center, yaw, size, shift_distance=0):
+def create_semi_ellipse(center, yaw, radius = (7, 20)):
+    """
+    Create a semi-ellipse as a Shapely Polygon oriented in the direction of rotation.
+
+    :param center (tuple): (x, y) coordinates of the semi-ellipse's center.
+    :param yaw (float): Rotation angle in degrees.
+    :param radius_x (float): Semi-major axis of the ellipse.
+    :param radius_y (float): Semi-minor axis of the ellipse.
+
+    :return Polygon: A Shapely Polygon representing the rotated semi-ellipse.
+    """
+    x, y = center
+    radius_x, radius_y = radius
+    # Create a unit circle and scale it to an ellipse
+    ellipse = Point(x, y).buffer(1)
+    ellipse = scale(ellipse, xfact=radius_x, yfact=radius_y)
+
+    # Rotate the ellipse by the given yaw
+    ellipse = rotate(ellipse, yaw, origin=(x, y))
+
+    yaw_rad = np.radians(yaw)
+
+    direction_vector = np.array([np.cos(yaw_rad), np.sin(yaw_rad)])
+
+    cutting_line = LineString([
+        (x - direction_vector[0] * radius_x, y - direction_vector[1] * radius_y),
+        (x + direction_vector[0] * radius_x, y + direction_vector[1] * radius_y)
+    ])
+    # Split the ellipse with the cutting line
+    split_ellipse = ellipse.difference(cutting_line.buffer(0.01))
+    
+    return split_ellipse[1]
+
+
+def create_semi_circle(center, yaw, radius=8):
+    """
+    Create a semi-circle as a Shapely Polygon oriented in the direction of rotation.
+
+    :param center (tuple): (x, y) coordinates of the semi-circle's center.
+    :param yaw (float): Rotation angle in degrees.
+    :param radius (float): Radius of the semi-circle.
+
+    :return Polygon: A Shapely Polygon representing the rotated semi-circle.
+    """
+    x, y = center
+
+    circle = Point(x, y).buffer(radius)
+
+    yaw_rad = np.radians(yaw)
+
+    direction_vector = np.array([np.cos(yaw_rad), np.sin(yaw_rad)])
+
+    cutting_line = LineString([
+        (x - direction_vector[0] * radius, y - direction_vector[1] * radius),
+        (x + direction_vector[0] * radius, y + direction_vector[1] * radius)
+    ])
+    
+    split_circle = circle.difference(cutting_line.buffer(0.01))
+
+    return split_circle[1]
+
+
+def create_rectangle(center, yaw, size, shift_distance=0):
     """
     Create a rotated rectangle as a Shapely Polygon with an option to shift its center up.
 
@@ -90,7 +153,7 @@ def create_rotated_rectangle(center, yaw, size, shift_distance=0):
     ])
 
     # Rotate the rectangle around its center
-    rotated_rectangle = affinity.rotate(rectangle, yaw, origin='center', use_radians=False)
+    rotated_rectangle = rotate(rectangle, yaw, origin='center', use_radians=False)
     if shift_distance == 0:
          return rotated_rectangle
     else:
@@ -100,7 +163,7 @@ def create_rotated_rectangle(center, yaw, size, shift_distance=0):
         shift_y = shift_distance * math.cos(yaw_radians)
 
         # Translate the rotated rectangle in the direction of rotation
-        shifted_rectangle = affinity.translate(rotated_rectangle, xoff=shift_x, yoff=shift_y)
+        shifted_rectangle = translate(rotated_rectangle, xoff=shift_x, yoff=shift_y)
 
         return shifted_rectangle
 

@@ -25,11 +25,11 @@ class CamDataProcessor(BaseTableLoader):
         #self.nuscenes = NuScenes(version, dataroot=Path(dataroot), verbose=True)
 
         if complexity == 1:
-            self.cameras = ['CAM_FRONT', 'CAM_BACK']
+            self.cameras = ['CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT']
         elif complexity == 2:
-            self.cameras = ['CAM_FRONT', 'CAM_BACK', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT']
+            self.cameras = ['CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT', 'CAM_BACK_RIGHT', 'CAM_BACK_LEFT']
         elif complexity == 3:
-            self.cameras = ['CAM_FRONT', 'CAM_BACK', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT', 'CAM_BACK_RIGHT', 'CAM_BACK_LEFT']
+            self.cameras = ['CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT', 'CAM_BACK_RIGHT', 'CAM_BACK_LEFT', 'CAM_FRONT', 'CAM_BACK']
 
         self.table_names = ['attribute','ego_pose','sensor', 'category', 'visibility','calibrated_sensor','sample_data', 'instance','sample', 'sample_annotation']
 
