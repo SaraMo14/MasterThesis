@@ -190,18 +190,18 @@ class PolicyGraph(nx.MultiDiGraph):
                 List containing tuples of (current state ID, action ID, next state ID).
         """
         self.discretizer.detection_cameras = [col for col in scene.columns if 'CAM' in col] 
-
         trajectory = []
         in_intersection = False
         intersection_info = []
 
         for i in range(len(scene)-1):
-            
             disc_state, action_id = self.discretizer._discretize_state_and_action(scene, i)
             trajectory.extend([disc_state, action_id])        
 
             #check for intersection start
-            if disc_state[0] == Predicate(BlockProgress, BlockProgress.INTERSECTION) and not in_intersection:
+            block_progress = next((predicate for predicate in disc_state if predicate.predicate.__name__ == 'BlockProgress'), None)
+
+            if block_progress == Predicate(BlockProgress, BlockProgress.INTERSECTION) and not in_intersection:
                 in_intersection = True
                 intersection_start = i
                 start_intersection_x, start_intersection_y = scene.iloc[i][['x', 'y']] if i > 0 else scene.iloc[i+1][['x', 'y']]
@@ -209,7 +209,8 @@ class PolicyGraph(nx.MultiDiGraph):
 
             
             #check for intersesction end
-            if in_intersection and disc_state[0] != Predicate(BlockProgress, BlockProgress.INTERSECTION):
+            if in_intersection and block_progress != Predicate(BlockProgress, BlockProgress.INTERSECTION):
+
                 in_intersection = False
 
                 end_intersection_x, end_intersection_y = scene.iloc[i][['x', 'y']] if i+1<len(scene) else scene.iloc[i-1][['x', 'y']]
@@ -217,7 +218,6 @@ class PolicyGraph(nx.MultiDiGraph):
 
                 intersection_action = AVDiscretizer.determine_intersection_action((pre_intersection_x, pre_intersection_y, start_intersection_x, start_intersection_y), (end_intersection_x, end_intersection_y, post_intersection_x, post_intersection_y))
                 intersection_info.append((intersection_start, intersection_action))
-
 
         #add last state
         last_state_to_discretize = scene.iloc[len(scene)-1][self.discretizer.state_to_be_discretized].tolist()
@@ -227,7 +227,7 @@ class PolicyGraph(nx.MultiDiGraph):
         trajectory.append(disc_last_state)
         #self.environment.stop_points.add(discretized_last_state)    
 
-
+        
         self.discretizer.assign_intersection_actions(trajectory, intersection_info, verbose)                
 
         return trajectory

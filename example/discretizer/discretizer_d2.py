@@ -1,13 +1,16 @@
 from example.discretizer.utils import Velocity, Rotation, IsTrafficLightNearby,IsZebraNearby,IsStopSignNearby
 from example.discretizer.discretizer import AVDiscretizer
+#from example.discretizer.discretizer_d1 import AVDiscretizerD1
 from example.environment import SelfDrivingEnvironment
 from pgeon.discretizer import Predicate
 from example.discretizer.utils import LanePosition, BlockProgress, NextIntersection, Velocity, Rotation
 
 import numpy as np
+from example.dataset.utils import create_rectangle
+
 from typing import Tuple, Union
 
-class AVDiscretizerD1(AVDiscretizer):
+class AVDiscretizerD2(AVDiscretizer):#AVDiscretizerD1):
     def __init__(self, environment: SelfDrivingEnvironment):
         super().__init__(environment)
         self.environment = environment
@@ -17,11 +20,15 @@ class AVDiscretizerD1(AVDiscretizer):
 
 
     def discretize_stop_line(self, x,y,yaw):
-        is_sign_nearby, is_zebra_nearby, is_traffic_light_nearby = self.environment.nearby_stop_lines( x,y,yaw)
+        # Create a rotated rectangle around the vehicle's current pose
+        yaw_in_deg = np.degrees(-(np.pi / 2) + yaw)
+        area = create_rectangle((x,y), yaw_in_deg, size=(15,20), shift_distance=10)
+
+        is_sign_nearby = IsStopSignNearby.YES  if self.environment.is_near_stop_sign(x,y,area) else IsStopSignNearby.NO
         
-        is_sign_nearby = IsStopSignNearby.YES  if is_sign_nearby else IsStopSignNearby.NO
-        is_zebra_nearby = IsZebraNearby.YES  if is_zebra_nearby else IsZebraNearby.NO
-        is_traffic_light_nearby = IsTrafficLightNearby.YES  if is_traffic_light_nearby else IsTrafficLightNearby.NO
+        is_zebra_nearby = IsZebraNearby.YES  if self.environment.is_near_ped_crossing(area) else IsZebraNearby.NO
+        
+        is_traffic_light_nearby = IsTrafficLightNearby.YES  if self.environment.is_near_traffic_light(yaw, area) else IsTrafficLightNearby.NO
 
         return is_sign_nearby, is_zebra_nearby, is_traffic_light_nearby
 
@@ -33,17 +40,20 @@ class AVDiscretizerD1(AVDiscretizer):
     
     def discretize(self, state: np.ndarray, detections=None) -> Tuple[Predicate, ...]:
         predicates = super().discretize(state, detections)
+        x, y, _, _, yaw = state 
+        stop_sign_predicate, zebra_predicate, traffic_light_predicate = self.discretize_stop_line(x,y,yaw)
 
-        x, y, velocity, steer_angle, yaw = state 
-        stop_sign_predicate, zebra_predicate, traffic_light_predicate = self.discretize_traffic_light(x,y,yaw)
         return (Predicate(IsStopSignNearby, [stop_sign_predicate]), Predicate(IsZebraNearby,[zebra_predicate]), Predicate(IsTrafficLightNearby, [traffic_light_predicate])) + predicates
 
     
     def str_to_state(self, state_str: str) -> Tuple[Union[Predicate, ]]:
         split_str = state_str.split(' ')
-        traffic_light_str, block_str, lane_pos_str, next_inter_str, vel_str, rot_str = split_str[0:6]
+        
+        stop_sign_str, zebra_str, traffic_light_str, block_str, lane_pos_str, next_inter_str, vel_str, rot_str = split_str[0:8]
 
-        traffic_light_predicate = IsTrafficLightNearby[traffic_light_str[:-2].split('(')[2]] 
+        stop_sign_predicate = IsStopSignNearby[stop_sign_str[:-2].split('(')[2]] 
+        zebra_predicate = IsZebraNearby[zebra_str[:-2].split('(')[1]] 
+        traffic_light_predicate = IsTrafficLightNearby[traffic_light_str[:-2].split('(')[1]] 
         progress_predicate = BlockProgress[block_str[:-2].split('(')[1]] 
         position_predicate = LanePosition[lane_pos_str[:-2].split('(')[1]]
         intersection_predicate = NextIntersection[next_inter_str[:-2].split('(')[1]]
@@ -51,6 +61,8 @@ class AVDiscretizerD1(AVDiscretizer):
         rot_predicate = Rotation[rot_str[:-2].split('(')[1]]
 
         predicates = [
+            Predicate(IsStopSignNearby, [stop_sign_predicate]),
+            Predicate(IsZebraNearby, [zebra_predicate]),
             Predicate(IsTrafficLightNearby, [traffic_light_predicate]),
             Predicate(BlockProgress, [progress_predicate]),
             Predicate(LanePosition, [position_predicate]),
@@ -60,9 +72,9 @@ class AVDiscretizerD1(AVDiscretizer):
         ]
         
 
-        if len(split_str) > 5:
+        if len(split_str) > 8:
             detected_predicates = []
-            for cam_detections in split_str[5:]:
+            for cam_detections in split_str[8:]:
                 
                 detection_class_str, count = cam_detections[:-1].split('(')
                 detection_class = self.STR_TO_CLASS_MAPPING.get(detection_class_str, None)

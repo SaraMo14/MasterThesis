@@ -10,7 +10,7 @@ from datetime import datetime
 import math
 from example.dataset.utils import create_rectangle,create_semi_circle, create_semi_ellipse, determine_travel_alignment
 from typing import Tuple, List
-from shapely.geometry import Point
+from shapely.geometry import Polygon, Point
 
 class SelfDrivingEnvironment(Environment):
 
@@ -24,21 +24,20 @@ class SelfDrivingEnvironment(Environment):
 
         self.current_state = None
 
-        #TODO: change based on velocity, start slowing down before
-
     
     def reset(self, test_scenes: pd.DataFrame, seed = None) -> Any:
         
+        pass
         #np.random.seed(seed)
 
         # Randomly select a scene_id
-        unique_scene_ids = test_scenes['scene_token'].unique()
-        selected_scene_id = np.random.choice(unique_scene_ids)
+        #unique_scene_ids = test_scenes['scene_token'].unique()
+        #selected_scene_id = np.random.choice(unique_scene_ids)
         
         # Get the starting point of the selected scene
-        starting_point = test_scenes[test_scenes['scene_token'] == selected_scene_id][['x','y','velocity', 'yaw_rate', 'acceleration', 'yaw', 'steering_angle']].iloc[0].tolist()
+        #starting_point = test_scenes[test_scenes['scene_token'] == selected_scene_id][['x','y','velocity', 'yaw_rate', 'acceleration', 'yaw', 'steering_angle']].iloc[0].tolist()
 
-        return starting_point#x, y, speed, yaw_rate, accel, yaw, steering_angle
+        #return starting_point#x, y, speed, yaw_rate, accel, yaw, steering_angle
 
     
         
@@ -203,25 +202,6 @@ class SelfDrivingEnvironment(Environment):
     ########################
 
     '''
-    def process_environment(self, x, y, speed, yaw_rate, accel, yaw, steering_angle):
-        """
-        Processes environmental information to adjust vehicle behavior.
-
-        Args:
-            environment (dict): Information about drivable area, lanes, pedestrian crossings, etc.
-        """
-
-        #check if car is on drivable area, otherwise bring the car to the closest point on closest lane
-        x,y = self.keep_drivable_area(x,y)
-
-        #check if car is near a stop line 
-        if self.is_near_stop_line(x, y):
-            speed, yaw_rate, accel = 0, 0, 0
-        
-        #self.is_near_traffic_light(x,y)
-
-        return x, y, speed, yaw_rate, accel, yaw, steering_angle
-
 
     def keep_drivable_area(self,x,y):
         is_lane_area = self.nusc_map.record_on_point(x, y, 'lane') 
@@ -279,53 +259,106 @@ class SelfDrivingEnvironment(Environment):
     #PROCESS NEARBY OBJECTS INFORMATION
     ###################################
 
-    def is_near_pedestrian(self, x,y, radius:float=8):
-            pass
-    
-
-
-    '''
-    def is_near_traffic_light(self, x,y, yaw, box_size=(15,40), eps=0.1):
-        #15: beacuse i want it to be large enough to capture semaphors of other lanes of the same road. or on the side 
-        #30: because
-        #eps
+    def is_near_stop_sign(self, x,y, front_area:Polygon):
         """
-        Check if there is a traffic light nearby the given pose (x, y).
+        Check if there is a stop sign or yield nearby the given pose (x, y).
 
         Args:
             x (float): Current x-coordinate of the vehicle.
             y (float): Current y-coordinate of the vehicle.
+            front_area (Polygon): Area in front of the vehicle to check for signs.
+
+        Returns:
+            bool: True if a sign is nearby the ego car in the same road block or at an interesection, False otherwise.
+        
+        """        
+
+        current_road_block = self.nusc_map.record_on_point(x,y, 'road_block')
+
+        for stop_line in self.nusc_map.stop_line:
+            if stop_line['stop_line_type'] in ['STOP_SIGN','YIELD']:
+                    stop_line_polygon = self.nusc_map.extract_polygon(stop_line['polygon_token'])                
+                    if stop_line_polygon.intersects(front_area):
+                        #print(f'A sign is intersecting: {stop_line}')
+
+                        if stop_line['road_block_token'] == current_road_block or current_road_block == '': #or intersection
+                                return True
+                
+        return False
+
+
+
+    def is_near_ped_crossing(self,front_area:Polygon):
+        """
+        Check if there is a pedestrian crossing or a turn stop with a pedestrian crossing nearby.
+
+        Args:
+            front_area (Polygon): Area in front of the vehicle to check for pedestrian crossings.
+
+        Returns:
+            bool: True if a pedestrian crossing or a turn stop with a pedestrian crossing is nearby, False otherwise.
+        """
+            
+        for ped_crossing in self.nusc_map.ped_crossing:  
+            ped_crossing_polygon = self.nusc_map.extract_polygon(ped_crossing['polygon_token'])
+            if ped_crossing_polygon.intersects(front_area):
+                #print('Zebra crossing nearby')
+                return True
+
+        for stop_line in self.nusc_map.stop_line:
+            if stop_line['stop_line_type'] == 'TURN_STOP':
+                    stop_line_polygon = self.nusc_map.extract_polygon(stop_line['polygon_token'])
+                    if stop_line_polygon.intersects(front_area):
+                        if stop_line['ped_crossing_tokens']:
+                            #print('Zebra crossing neaby (turn stop)')
+                            return True 
+                        else:
+                            print('Turn stop without zebra crossing. To be handled.)') #TODO:
+            return False
+
+    
+    def is_near_traffic_light(self, yaw, front_area:Polygon, eps=0.1):
+        
+        """
+        Check if there is a traffic light nearby the given pose (x, y).
+
+        Args:
             yaw (float): Yaw angle of the vehicle in radians.
-            eps (float): Epsilon value for alignment tolerance
+            front_area (Polygon): Area for detecting traffic light.
+            eps (float): Epsilon value for alignment tolerance.
 
         Returns:
             bool: True if a traffic light is nearby and aligned with the vehicle's direction of travel, False otherwise.
-            (TODO return dict: Information about the nearby traffic light (if any))
-        
         """
 
-        # Create a rotated rectangle around the vehicle's current pose
-        yaw_in_deg =  math.degrees(-(math.pi / 2) + yaw)
-        rotated_rectangle = create_rotated_rectangle((x,y), yaw_in_deg, box_size, shift_distance=15)
         for traffic_light in self.nusc_map.traffic_light:
                 line = self.nusc_map.extract_line(traffic_light['line_token'])
-                if line.is_empty:  # Skip lines without nodes
-                    continue
                 xs, ys = line.xy
                 point = Point(xs[0], ys[0])# Traffic light is represented as a line, we take the starting point
-                
-                if point.within(rotated_rectangle):
-                    
-                    traffic_light_direction = (xs[1] - xs[0], ys[1] - ys[0])
-                    
+                if point.within(front_area):
+                    traffic_light_direction = (xs[1] - xs[0], ys[1] - ys[0])   
                     alignment = determine_travel_alignment(traffic_light_direction, yaw)
-                    eps = 0.5 #explain why not 0.1
-                    if alignment <eps:#-eps:
+                    #print(f'traffic light alignmenet {alignment}')
+                    if alignment <-eps:
+                         #print('valid traffic light')
                         return True
-                
-        return False
-        '''
+        
+        for stop_line in self.nusc_map.stop_line:
+            if stop_line['stop_line_type'] == 'TRAFFIC_LIGHT' and stop_line['traffic_light_tokens']:
+                    stop_line_polygon = self.nusc_map.extract_polygon(stop_line['polygon_token'])
+                    if stop_line_polygon.intersects(front_area):
+                            for token in stop_line['traffic_light_tokens']:
+                                traffic_light = self.nusc_map.get('traffic_light', token)
+                                line = self.nusc_map.extract_line(traffic_light['line_token'])
+                                xs, ys = line.xy                              
+                                traffic_light_direction = (xs[1] - xs[0], ys[1] - ys[0])   
+                                alignment = determine_travel_alignment(traffic_light_direction, yaw)
+                                #print(f'traffic light alignmenet {alignment}')
+                                if alignment <-eps:
+                                    #print('valid traffic light stop line')
+                                    return True
 
+        return False
 
 
 
@@ -347,7 +380,7 @@ class SelfDrivingEnvironment(Environment):
         yaw =  math.degrees(-(math.pi / 2) + yaw)
         
         # rectangle centered at (x, y) and rotated of yaw angle representing the agent
-        rotated_rectangle = create_rotated_rectangle((x,y), yaw, agent_size)
+        rotated_rectangle = create_rectangle((x,y), yaw, agent_size)
 
         for record in self.dividers:
             line = self.nusc_map.extract_line(record['line_token'])
@@ -467,87 +500,3 @@ class SelfDrivingEnvironment(Environment):
         return (block_progress, lane_position)
         
             
-    
-    
-
-    '''
-    def get_direction_of_travel(self, x,y,yaw,  epsilon=0.3):
-        #TODO: hanle intersections and other possible situations
-        #1. compute closest point of arcline_path of current lane
-        current_lane = self.nusc_map.record_on_point(x,y, 'lane')
-        lane= self.nusc_map.get_arcline_path(current_lane)
-
-        closest_pose_idx_to_lane, lane_record = self.project_pose_to_lane((x, y, yaw), lane)
-        
-        #2. compute reference direction vector
-        #create a unit vector pointing in the direction of the lane's travel.ù
-        #You can achieve this by taking two consecutive points from the arcline path and subtracting their positions.
-        # Determine the tangent vector at the closest point
-        if closest_pose_idx_to_lane == len(lane_record)-1 :
-            tangent_vector = lane_record[closest_pose_idx_to_lane] - lane_record[closest_pose_idx_to_lane - 1] 
-        else:
-            tangent_vector = lane_record[closest_pose_idx_to_lane + 1] - lane_record[closest_pose_idx_to_lane]
-
-        
-        #3. NOrmalize vector to get a unit vector
-        # Check if the tangent vector is a zero vector
-        tangent_vector_norm = np.linalg.norm(tangent_vector)
-        if tangent_vector_norm == 0:
-            print("Uncertain direction due to zero tangent vector")
-            return 0
-        
-        reference_direction_unit = tangent_vector / tangent_vector_norm  # Normalize the tangent vector
-
-        #4.compute ego vehicle's heading direction vector
-        heading_vector = np.array([np.cos(yaw), np.sin(yaw)])
-
-
-        #5. compute dot product of there vectors. It ranges from -1 (completely opposite directions) to 1 (identical directions).
-        dot_product = np.dot(reference_direction_unit, heading_vector)
-         #6. Interpret results
-        #A positive dot product (closer to 1) indicates the ego vehicle is aligned with the lane's travel direction.
-        #A negative dot product (closer to -1) indicates the ego vehicle is facing the opposite direction of the lane.
-        #A dot product near zero (-eps, +eps) suggests the vehicle is almost perpendicular to the lane's direction,
-
-        if dot_product > epsilon:
-            print("In travel direction of lane")
-            return 1
-        elif dot_product < -epsilon:
-            print("Opposite to travel direction of lane")
-            return -1
-        else:
-            print("Uncertain direction")
-            return 0 #car perpendicular to the lane
-        '''
-
-    '''
-    def get_lane_position(self, x,y, yaw, agent_size:Tuple[float, float]):
-            """
-            Returns Left, Right or Center based on the car position. 
-            Left if on the left lane of the road, RIGHT is right and Center if in the 
-            center.
-
-            """
-
-            #we suppose drivers stay on the right. 
-            #1. check if has a road divider on the left. If yes: right
-
-            #2. check if has a road divider on the right. If yes: left
-            #3. check if ego vehicle is on road divider. If yes: center
-            #4. right
-
-            if self.is_on_divider(x,y, yaw, agent_size):
-                    return LanePosition.CENTER
-            #elif intersection
-            else:
-                direction = self.get_direction_of_travel(x,y,yaw)
-                if direction>0:
-                    return LanePosition.RIGHT
-                elif direction<0:
-                    return LanePosition.LEFT
-                else:
-                    return None #TODO: handle exceptions
-
-    '''
-    
-    

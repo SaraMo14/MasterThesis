@@ -3,6 +3,9 @@ import pgeon.policy_graph as PG
 from pathlib import Path
 from example.environment import SelfDrivingEnvironment
 from example.discretizer.discretizer import AVDiscretizer
+#from example.discretizer.discretizer_d1 import AVDiscretizerD1
+from example.discretizer.discretizer_d2 import AVDiscretizerD2
+from example.discretizer.discretizer_d3 import AVDiscretizerD3
 import pandas as pd
 
 if __name__ == '__main__':
@@ -10,7 +13,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', help='Input data folder of states and actions.', default=".")
     parser.add_argument('--file', help='Input data file name of states and actions.')
     parser.add_argument('--city', help='Specify city to consider when building the PG.', choices=['all', 'b','s1','s2', 's3'], default="all")
-    parser.add_argument('--discretizer', type=int, help='Specify the discretizer of the input data.', choices=[0, 1, 2], default=0)
+    parser.add_argument('--discretizer', type=int, help='Specify the discretizer of the input data.', choices=[0, 1, 2,3], default=0)
     parser.add_argument('--output', help='Which format to output the Policy Graph',
                         default='csv', choices=['pickle', 'csv', 'gram'])
     parser.add_argument('--verbose', help='Whether to make the Policy Graph code output log statements or not',
@@ -50,7 +53,7 @@ if __name__ == '__main__':
  
     #TODO: update
     env = SelfDrivingEnvironment(city)
-    discretizer = {0: AVDiscretizer, 1: None, 2: None}[discretizer_id](env)
+    discretizer = {0: AVDiscretizer, 1: None, 2: AVDiscretizerD2, 3: AVDiscretizerD3}[discretizer_id](env)
    
 
     df = pd.read_csv(Path(data_folder) / data_file, dtype=dtype_dict, parse_dates=['timestamp'])

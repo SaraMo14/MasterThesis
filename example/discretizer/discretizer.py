@@ -1,5 +1,5 @@
 from example.dataset.utils import vector_angle
-from example.discretizer.utils import Detection, FrontLeftObjects, FrontObjects, FrontRightObjects, LeftObjects, RightObjects, FrontObjects, BackObjects, Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation
+from example.discretizer.utils import Detection, FrontLeftObjects, FrontObjects, FrontRightObjects, BackLeftObjects, BackRightObjects, FrontObjects, BackObjects, Action, LanePosition, BlockProgress, NextIntersection, Velocity, Rotation
 from example.environment import SelfDrivingEnvironment
 import numpy as np
 from typing import Tuple, Union
@@ -32,18 +32,18 @@ class AVDiscretizer(Discretizer):
         self.DETECTION_CLASS_MAPPING = {
         'CAM_FRONT_LEFT': FrontLeftObjects,
         'CAM_FRONT_RIGHT': FrontRightObjects,
-        'CAM_LEFT': LeftObjects,
-        'CAM_RIGHT': RightObjects,
+        'CAM_BACK_LEFT': BackLeftObjects,
+        'CAM_BACK_RIGHT': BackRightObjects,
         'CAM_FRONT': FrontObjects,
         'CAM_BACK': BackObjects
         }
         self.STR_TO_CLASS_MAPPING = {
-            'DetectFrontLeft': FrontLeftObjects,
-            'DetectFrontRight': FrontRightObjects,
-            'DetectLeft': LeftObjects,
-            'DetectRight': RightObjects,
-            'DetectFront': FrontObjects,
-            'DetectBack': BackObjects
+            'FrontLeftObjects': FrontLeftObjects,
+            'FrontRightObjects': FrontRightObjects,
+            'BackLeftObjects': BackLeftObjects,
+            'BackRightObjects': BackRightObjects,
+            'FrontObjects': FrontObjects,
+            'BackObjects': BackObjects
         }
     
     @staticmethod
@@ -61,7 +61,6 @@ class AVDiscretizer(Discretizer):
         block_progress_pred, lane_pos_pred  = self.discretize_position(x,y,yaw)
         mov_predicate = self.discretize_speed(velocity)
         rot_predicate = self.discretize_steering_angle(steer_angle)
-
         if detections is not None:
             detected_predicates = self.discretize_detections(detections)
             return (Predicate(BlockProgress, [block_progress_pred]),
@@ -77,14 +76,6 @@ class AVDiscretizer(Discretizer):
                 Predicate(Velocity, [mov_predicate]),
                 Predicate(Rotation, [rot_predicate]))
         
-
-    #def discretize_detections(self, detections)-> List:
-    #    detected_predicates = []
-    #    for cam_type, objects in detections.items():
-    #        obj = DetectedObject() if objects=="{}" else DetectedObject(cam_type) 
-            
-    #        detected_predicates.append(Predicate(DetectedObject, [obj]))
-    #    return detected_predicates
 
     def discretize_detections(self, detections):
         detected_predicates = []
@@ -140,7 +131,12 @@ class AVDiscretizer(Discretizer):
             Updated trajectory with assigned actions for intersections.
         """
         for i in range(0, len(trajectory), 2):  # Access states
-            if trajectory[i][0] == Predicate(BlockProgress, BlockProgress.INTERSECTION):
+            
+                
+            '''
+            block_progress = next((predicate for predicate in trajectory[i] if predicate.predicate.__name__ == 'BlockProgress'), None)
+
+            if block_progress == Predicate(BlockProgress, BlockProgress.INTERSECTION):
                 if verbose:
                     print(f'frame {int(i/2)} --> {trajectory[i]}')
                     if i<len(trajectory) - 1:
@@ -149,11 +145,13 @@ class AVDiscretizer(Discretizer):
                         print('END')
                 continue
 
+            '''
 
             for idx, action in intersection_info:
                 if 2 * idx > i and 2 * idx < len(trajectory) - 1: #check if the intersection state (2*idx) comes next the current state (i)
                     state = list(trajectory[i])
-                    state[2] = action
+                    next_intersect_idx = next((i for i, predicate in enumerate(state) if predicate.predicate.__name__ == 'NextIntersection'), None)
+                    state[next_intersect_idx] = action
                     trajectory[i] = tuple(state)
                     break
             if verbose:

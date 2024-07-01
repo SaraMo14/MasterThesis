@@ -90,17 +90,28 @@ class FrontRightObjects(Detection):
 class FrontLeftObjects(Detection):
     pass
 
-class RightObjects(Detection):
+class BackRightObjects(Detection):
     pass
 
-class LeftObjects(Detection):
+class BackLeftObjects(Detection):
     pass
 
 
 
+class IsPedestrianNearby(Enum):
+    YES = auto()
+    NO = auto()
+    
+    def __str__(self):
+            return f'{self.__class__.__name__}({self.name})'
 
 
-
+class IsBikeNearby(Enum): #bycicles + scooters
+    YES = auto()
+    NO = auto()
+    
+    def __str__(self):
+            return f'{self.__class__.__name__}({self.name})'
 
 
 

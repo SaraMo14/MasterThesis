@@ -292,3 +292,5 @@ if __name__ == "__main__":
     sample_tokens = pd.DataFrame(processor.sample)['token'].to_frame()
     processor.cam_detection(sample_tokens)
 
+#python3 create_cam_data.py --dataroot /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --dataoutput /home/saramontese/Desktop/MasterThesis/example/dataset/data/sets/nuscenes --version v1.0-mini --complexity 3
+
